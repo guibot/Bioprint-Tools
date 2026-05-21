@@ -1,0 +1,601 @@
+<script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
+
+<style>
+  .tool { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; min-height: 100%; }
+
+  .tool-params { display: flex; flex-direction: column; gap: 1.5rem; }
+
+  .param-group { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .param-group-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text3);
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .param-row {
+    display: flex; align-items: center;
+    justify-content: space-between; gap: 1rem;
+  }
+
+  .param-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
+
+  .param-row input,
+  .param-row select {
+    width: 90px;
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 5px 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right;
+    outline: none; transition: border-color 0.15s;
+  }
+  .param-row select { text-align: left; cursor: pointer; }
+  .param-row input:focus,
+  .param-row select:focus { border-color: var(--accent); }
+
+  /* file drop zone */
+  .drop-zone {
+    border: 1px dashed var(--border2); border-radius: 8px;
+    padding: 1.2rem 1rem; text-align: center;
+    cursor: pointer; transition: border-color 0.15s, background 0.15s;
+    display: flex; flex-direction: column; align-items: center; gap: 0.4rem;
+  }
+  .drop-zone:hover,
+  .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-dim); }
+  .drop-zone .dz-label { font-size: 12px; color: var(--text2); }
+  .drop-zone .dz-hint  { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3); }
+  .drop-zone .dz-file  { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--accent); }
+  #file-input { display: none; }
+
+  /* output */
+  .tool-output { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .output-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+  .btn-generate {
+    background: var(--accent); color: #000;
+    border: none; border-radius: 7px;
+    padding: 8px 18px; font-size: 13px; font-weight: 700;
+    cursor: pointer; font-family: 'Geist', sans-serif;
+    transition: background 0.15s;
+  }
+  .btn-generate:hover { background: var(--accent-mid); }
+  .btn-generate:disabled { opacity: 0.35; cursor: default; }
+
+  .btn-download {
+    background: transparent; color: var(--text2);
+    border: 1px solid var(--border2); border-radius: 7px;
+    padding: 8px 14px; font-size: 13px;
+    cursor: pointer; font-family: 'Geist', sans-serif;
+    transition: all 0.15s;
+  }
+  .btn-download:hover { border-color: var(--text3); color: var(--text); }
+  .btn-download:disabled { opacity: 0.3; cursor: default; }
+
+  .output-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text3); min-height: 1.2em;
+  }
+  .output-meta .warn { color: #ff6b35; }
+
+  .log {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.75rem 1rem;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text3); line-height: 1.7;
+    display: none; white-space: pre-wrap;
+    max-height: 100px; overflow-y: auto;
+  }
+  .log.visible { display: block; }
+  .log .log-warn { color: #ff6b35; }
+
+  /* tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 6px 14px; margin-bottom: -1px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text3); cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text2); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* preview */
+  .preview-wrap {
+    display: none; flex-direction: column; align-items: center;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem;
+  }
+  .preview-wrap.active { display: flex; }
+  canvas { border-radius: 4px; max-width: 100%; }
+
+  .gcode-output {
+    display: none; flex: 1; min-height: 420px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text2); line-height: 1.6;
+    resize: none; outline: none; overflow-y: auto;
+  }
+  .gcode-output.active { display: block; }
+</style>
+
+<div class="tool">
+
+  <div class="tool-params">
+
+    <div class="param-group">
+      <div class="param-group-label">DXF File</div>
+      <div class="drop-zone" id="drop-zone" onclick="document.getElementById('file-input').click()">
+        <span class="dz-label">Click or drag a .dxf file</span>
+        <span class="dz-hint dz-file" id="file-name">no file selected</span>
+      </div>
+      <input type="file" id="file-input" accept=".dxf">
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Path</div>
+      <div class="param-row">
+        <label>Start from</label>
+        <select id="start_from">
+          <option value="inner">inner</option>
+          <option value="outer">outer</option>
+        </select>
+      </div>
+      <div class="param-row"><label>Points per arc</label><input id="resolution" type="number" value="100" step="10" min="10"></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Print</div>
+      <div class="param-row"><label>Temperature (°C)</label>  <input id="temperature"   type="number" value="280" step="5"></div>
+      <div class="param-row"><label>Layer height (mm)</label> <input id="layer_height"  type="number" value="0.6" step="0.1"></div>
+      <div class="param-row"><label>Print speed (mm/min)</label><input id="print_speed" type="number" value="60"  step="5"></div>
+      <div class="param-row"><label>E per mm</label>          <input id="e_per_mm"      type="number" value="0.009" step="0.001"></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Position</div>
+      <div class="param-row"><label>Bed center X (mm)</label> <input id="center_x" type="number" value="150" step="1"></div>
+      <div class="param-row"><label>Bed center Y (mm)</label> <input id="center_y" type="number" value="100" step="1"></div>
+    </div>
+
+  </div>
+
+  <div class="tool-output">
+    <div class="output-actions">
+      <button class="btn-generate" id="btn-generate" onclick="generate()" disabled>Generate</button>
+      <button class="btn-download" id="btn-download" onclick="download()" disabled>Download .gcode</button>
+    </div>
+    <div class="output-meta" id="meta"></div>
+    <div class="log" id="log"></div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('preview')">Preview</button>
+      <button class="tab-btn"        onclick="switchTab('gcode')">G-code</button>
+    </div>
+
+    <div class="preview-wrap active" id="tab-preview">
+      <canvas id="canvas" width="480" height="480"></canvas>
+    </div>
+    <textarea class="gcode-output" id="tab-gcode" readonly placeholder="G-code will appear here…"></textarea>
+  </div>
+
+</div>
+
+<script>
+// ── FILE HANDLING ─────────────────────────────────────────────────────────────
+
+let dxfContent = null;
+
+function onFileLoaded(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    dxfContent = e.target.result;
+    document.getElementById('file-name').textContent = file.name;
+    document.getElementById('btn-generate').disabled = false;
+    document.getElementById('meta').textContent = '';
+  };
+  reader.readAsText(file);
+}
+
+document.getElementById('file-input').addEventListener('change', e => {
+  if (e.target.files[0]) onFileLoaded(e.target.files[0]);
+});
+
+const dropZone = document.getElementById('drop-zone');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', ()  => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) onFileLoaded(file);
+});
+
+// ── MATH HELPERS ──────────────────────────────────────────────────────────────
+
+const TAU = Math.PI * 2;
+
+function arcToPoints(cx, cy, radius, startAngle, endAngle, n = 100, ccw = true) {
+  let sa = startAngle, ea = endAngle;
+  if (ccw) { if (ea <= sa) ea += TAU; }
+  else      { if (ea >= sa) ea -= TAU; }
+  const pts = [];
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const a = sa + t * (ea - sa);
+    pts.push([cx + radius * Math.cos(a), cy + radius * Math.sin(a)]);
+  }
+  return pts;
+}
+
+function arcEndpoints(arc) {
+  const {cx, cy, radius, startAngle, endAngle} = arc;
+  return [
+    [cx + radius * Math.cos(startAngle), cy + radius * Math.sin(startAngle)],
+    [cx + radius * Math.cos(endAngle),   cy + radius * Math.sin(endAngle)],
+  ];
+}
+
+function dist(p1, p2) {
+  return Math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2);
+}
+
+function close(p1, p2, tol = 0.1) {
+  return dist(p1, p2) < tol;
+}
+
+// ── DXF → ENTITY LIST ────────────────────────────────────────────────────────
+
+function parseDxf(content) {
+  const parser = new DxfParser();
+  const dxf = parser.parseSync(content);
+
+  const entities = [];
+  for (const e of dxf.entities) {
+    if (e.type === 'ARC') {
+      entities.push({
+        type: 'arc',
+        cx: e.center.x, cy: e.center.y,
+        radius: e.radius,
+        startAngle: e.startAngle,  // radians
+        endAngle:   e.endAngle,
+      });
+    } else if (e.type === 'LWPOLYLINE' || e.type === 'POLYLINE') {
+      const pts = (e.vertices || []).map(v => [v.x, v.y]);
+      if (pts.length >= 2) entities.push({ type: 'polyline', points: pts });
+    } else if (e.type === 'LINE') {
+      const vs = e.vertices || [];
+      if (vs.length >= 2) entities.push({ type: 'polyline', points: [[vs[0].x, vs[0].y], [vs[1].x, vs[1].y]] });
+    } else if (e.type === 'SPLINE') {
+      // approximate with control points if available
+      const pts = (e.controlPoints || []).map(p => [p.x, p.y]);
+      if (pts.length >= 2) entities.push({ type: 'polyline', points: pts });
+    }
+  }
+  return entities;
+}
+
+// ── CHAIN ARCS ────────────────────────────────────────────────────────────────
+
+function getEndpoints(entity) {
+  if (entity.type === 'polyline') {
+    const pts = entity.points;
+    return [pts[0], pts[pts.length - 1]];
+  }
+  return arcEndpoints(entity);
+}
+
+function chainEntities(entities, startFrom) {
+  const log = [];
+  if (!entities.length) return { chain: [], log };
+
+  const info = entities.map(e => {
+    const [start, end] = getEndpoints(e);
+    return { entity: e, start, end };
+  });
+
+  // find tips: endpoints that don't connect to any other entity
+  const allEp = [];
+  info.forEach((inf, i) => {
+    allEp.push({ pt: inf.start, idx: i, which: 'start' });
+    allEp.push({ pt: inf.end,   idx: i, which: 'end'   });
+  });
+
+  const tips = [];
+  for (const ep of allEp) {
+    const hasMatch = allEp.some(other =>
+      !(other.idx === ep.idx && other.which === ep.which) && close(ep.pt, other.pt)
+    );
+    if (!hasMatch) {
+      tips.push({ dist: Math.sqrt(ep.pt[0]**2 + ep.pt[1]**2), ...ep });
+    }
+  }
+
+  log.push(`Found ${entities.length} entities, ${tips.length} tip(s)`);
+
+  let startIdx, reverseFirst;
+  if (tips.length >= 2) {
+    tips.sort((a, b) => a.dist - b.dist);
+    const chosen = startFrom === 'inner' ? tips[0] : tips[tips.length - 1];
+    startIdx     = chosen.idx;
+    reverseFirst = chosen.which === 'end';
+  } else {
+    log.push('⚠ Could not find spiral tips — using first entity');
+    startIdx     = 0;
+    reverseFirst = false;
+  }
+
+  const used  = new Array(info.length).fill(false);
+  const chain = [];
+  used[startIdx] = true;
+  chain.push({ idx: startIdx, reverse: reverseFirst });
+
+  let current = reverseFirst ? info[startIdx].start : info[startIdx].end;
+
+  while (chain.length < info.length) {
+    let found = false;
+    for (let i = 0; i < info.length; i++) {
+      if (used[i]) continue;
+      if (close(current, info[i].start)) {
+        chain.push({ idx: i, reverse: false });
+        current = info[i].end;
+        used[i] = true; found = true; break;
+      }
+      if (close(current, info[i].end)) {
+        chain.push({ idx: i, reverse: true });
+        current = info[i].start;
+        used[i] = true; found = true; break;
+      }
+    }
+    if (!found) {
+      const remaining = info.filter((_, i) => !used[i]).length;
+      log.push(`⚠ Chain broke with ${remaining} entity(s) unconnected`);
+      break;
+    }
+  }
+
+  log.push(`Chained ${chain.length}/${info.length} entities`);
+  return { chain, info, log };
+}
+
+// ── PATH POINTS ───────────────────────────────────────────────────────────────
+
+function buildPath(chain, info, resolution) {
+  const all = [];
+  for (const { idx, reverse } of chain) {
+    const e = info[idx].entity;
+    let pts;
+
+    if (e.type === 'polyline') {
+      pts = reverse ? [...e.points].reverse() : [...e.points];
+    } else {
+      pts = reverse
+        ? arcToPoints(e.cx, e.cy, e.radius, e.endAngle,   e.startAngle, resolution, true)
+        : arcToPoints(e.cx, e.cy, e.radius, e.startAngle, e.endAngle,   resolution, true);
+    }
+
+    // skip duplicate junction point
+    if (all.length && pts.length && close(all[all.length - 1], pts[0])) pts = pts.slice(1);
+    all.push(...pts);
+  }
+  return all;
+}
+
+// ── G-CODE ────────────────────────────────────────────────────────────────────
+
+const RAMP_SPEEDS    = [55.6, 58.0, 59.9];
+const RAMP_E_PER_MM  = [0.01576, 0.01128, 0.00907];
+const RAMP_SEGMENTS  = 3;
+const TRAVEL_SPEED   = 3600;
+
+function buildGcode(points, params) {
+  const { temperature, layerHeight, printSpeed, ePerMm, centerX, centerY } = params;
+  const lines = [];
+
+  lines.push(';FLAVOR:Marlin');
+  lines.push(';Generated by dxf-to-gcode — continuous spiral path');
+  lines.push(`;Layer height: ${layerHeight}`);
+  lines.push(`;Print speed: ${printSpeed} mm/min (${(printSpeed/60).toFixed(1)} mm/s)`);
+  lines.push(`;E per mm: ${ePerMm}`);
+  lines.push(`;Total points: ${points.length}`);
+  lines.push('');
+  lines.push(`M104 S${temperature}`);
+  lines.push('M105');
+  lines.push(`M109 S${temperature}`);
+  lines.push('G28 ;Home');
+  lines.push('G1 Z1.0 F3000 ;Move platform');
+  lines.push('M82 ;Absolute extrusion mode');
+  lines.push('G92 E0');
+  lines.push('G92 E0');
+  lines.push('');
+  lines.push(';LAYER_COUNT:1');
+  lines.push(';LAYER:0');
+  lines.push('M107');
+  lines.push('');
+
+  const sx = points[0][0] + centerX;
+  const sy = points[0][1] + centerY;
+  lines.push(`;--- Start of continuous spiral ---`);
+  lines.push(`G0 F${TRAVEL_SPEED} X${sx.toFixed(3)} Y${sy.toFixed(3)} Z${layerHeight}`);
+  lines.push('');
+  lines.push(';TYPE:WALL-OUTER');
+
+  let eTotal = 0;
+  let pathLength = 0;
+
+  for (let i = 1; i < points.length; i++) {
+    const [x0, y0] = points[i - 1];
+    const [x1, y1] = points[i];
+    const gx = x1 + centerX;
+    const gy = y1 + centerY;
+    const d  = Math.sqrt((x1-x0)**2 + (y1-y0)**2);
+    if (d < 0.0001) continue;
+    pathLength += d;
+
+    const isRamp = i <= RAMP_SEGMENTS;
+    const speed  = isRamp ? RAMP_SPEEDS[i - 1]   : printSpeed;
+    const eMm    = isRamp ? RAMP_E_PER_MM[i - 1] : ePerMm;
+    eTotal += d * eMm;
+
+    if (isRamp || i === RAMP_SEGMENTS + 1) {
+      lines.push(`G1 F${speed} X${gx.toFixed(3)} Y${gy.toFixed(3)} E${eTotal.toFixed(5)}`);
+    } else {
+      lines.push(`G1 X${gx.toFixed(3)} Y${gy.toFixed(3)} E${eTotal.toFixed(5)}`);
+    }
+  }
+
+  lines.push('');
+  lines.push(`;--- End of spiral (total E: ${eTotal.toFixed(5)}) ---`);
+  lines.push('');
+  lines.push('M104 S0 ; Hotend off');
+  lines.push('M140 S0 ; Bed off');
+  lines.push('');
+  lines.push('G91 ; Relative mode');
+  lines.push('G1 Z5 F300 ; Lower bed 5mm');
+  lines.push('G90 ; Back to absolute');
+  lines.push('');
+  lines.push('M82 ;Absolute extrusion mode');
+  lines.push('M104 S0');
+  lines.push(';End of Gcode');
+
+  return { gcode: lines.join('\n'), pathLength, eTotal };
+}
+
+// ── TAB + PREVIEW ─────────────────────────────────────────────────────────────
+
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach((b, i) =>
+    b.classList.toggle('active', ['preview','gcode'][i] === name)
+  );
+  document.getElementById('tab-preview').classList.toggle('active', name === 'preview');
+  document.getElementById('tab-gcode').classList.toggle('active',   name === 'gcode');
+}
+
+function drawPreview(points) {
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  const pad = 24;
+
+  ctx.fillStyle = '#0d0e10';
+  ctx.fillRect(0, 0, W, H);
+
+  if (!points.length) return;
+
+  // compute bounds
+  let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+  for (const [x, y] of points) {
+    if (x < minX) minX = x; if (x > maxX) maxX = x;
+    if (y < minY) minY = y; if (y > maxY) maxY = y;
+  }
+  const rangeX = maxX - minX || 1;
+  const rangeY = maxY - minY || 1;
+  const scale  = Math.min((W - pad * 2) / rangeX, (H - pad * 2) / rangeY);
+
+  const toCanvas = ([x, y]) => [
+    pad + (x - minX) * scale,
+    H - pad - (y - minY) * scale,   // flip Y
+  ];
+
+  // path
+  ctx.beginPath();
+  ctx.strokeStyle = '#4ade80';
+  ctx.lineWidth = 1;
+  ctx.globalAlpha = 0.85;
+  const [sx, sy] = toCanvas(points[0]);
+  ctx.moveTo(sx, sy);
+  for (let i = 1; i < points.length; i++) {
+    const [px, py] = toCanvas(points[i]);
+    ctx.lineTo(px, py);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // start dot
+  const [ax, ay] = toCanvas(points[0]);
+  ctx.beginPath();
+  ctx.arc(ax, ay, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#4ade80';
+  ctx.fill();
+
+  // end dot
+  const [bx, by] = toCanvas(points[points.length - 1]);
+  ctx.beginPath();
+  ctx.arc(bx, by, 4, 0, Math.PI * 2);
+  ctx.fillStyle = '#60a5fa';
+  ctx.fill();
+}
+
+// ── MAIN ──────────────────────────────────────────────────────────────────────
+
+function generate() {
+  if (!dxfContent) return;
+
+  const logEl  = document.getElementById('log');
+  const metaEl = document.getElementById('meta');
+  logEl.innerHTML = '';
+  logEl.classList.remove('visible');
+  metaEl.textContent = '';
+
+  let entities, chain, info, chainLog;
+  try {
+    entities = parseDxf(dxfContent);
+  } catch (err) {
+    metaEl.innerHTML = `<span class="warn">DXF parse error: ${err.message}</span>`;
+    return;
+  }
+
+  if (!entities.length) {
+    metaEl.innerHTML = `<span class="warn">No supported entities found in DXF (ARC, LINE, LWPOLYLINE, SPLINE)</span>`;
+    return;
+  }
+
+  const startFrom  = document.getElementById('start_from').value;
+  const resolution = parseInt(document.getElementById('resolution').value, 10);
+  ({ chain, info, log: chainLog } = chainEntities(entities, startFrom));
+
+  const points = buildPath(chain, info, resolution);
+
+  const params = {
+    temperature: parseFloat(document.getElementById('temperature').value),
+    layerHeight: parseFloat(document.getElementById('layer_height').value),
+    printSpeed:  parseFloat(document.getElementById('print_speed').value),
+    ePerMm:      parseFloat(document.getElementById('e_per_mm').value),
+    centerX:     parseFloat(document.getElementById('center_x').value),
+    centerY:     parseFloat(document.getElementById('center_y').value),
+  };
+
+  const { gcode, pathLength, eTotal } = buildGcode(points, params);
+  document.getElementById('tab-gcode').value = gcode;
+  document.getElementById('btn-download').disabled = false;
+
+  const estTime = (pathLength / (params.printSpeed / 60)).toFixed(0);
+  metaEl.textContent =
+    `${points.length} points · ${pathLength.toFixed(1)} mm path · ~${estTime}s · E total: ${eTotal.toFixed(4)}`;
+
+  if (chainLog.length) {
+    logEl.innerHTML = chainLog.map(l =>
+      l.startsWith('⚠') ? `<span class="log-warn">${l}</span>` : l
+    ).join('\n');
+    logEl.classList.add('visible');
+  }
+
+  drawPreview(points);
+  switchTab('preview');
+}
+
+function download() {
+  const gcode = document.getElementById('output').value;
+  if (!gcode) return;
+  const name = document.getElementById('file-name').textContent.replace(/\.dxf$/i, '') || 'spiral';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([gcode], { type: 'text/plain' }));
+  a.download = `${name}.gcode`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+</script>

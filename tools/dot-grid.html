@@ -1,0 +1,264 @@
+<style>
+  .tool { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; min-height: 100%; }
+
+  .tool-params { display: flex; flex-direction: column; gap: 1.5rem; }
+
+  .param-group { display: flex; flex-direction: column; gap: 0.5rem; }
+
+  .param-group-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--text3);
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .param-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  .param-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
+  .param-row input {
+    width: 90px;
+    background: var(--surface2); border: 1px solid var(--border2);
+    border-radius: 6px; padding: 5px 8px;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right;
+    outline: none; transition: border-color 0.15s;
+  }
+  .param-row input:focus { border-color: var(--accent); }
+
+  /* output panel */
+  .tool-output { display: flex; flex-direction: column; gap: 0.75rem; }
+
+  .output-actions { display: flex; gap: 0.5rem; align-items: center; }
+
+  .btn-generate {
+    background: var(--accent); color: #000;
+    border: none; border-radius: 7px;
+    padding: 8px 18px; font-size: 13px; font-weight: 700;
+    cursor: pointer; font-family: 'Geist', sans-serif;
+    transition: background 0.15s;
+  }
+  .btn-generate:hover { background: var(--accent-mid); }
+
+  .btn-download {
+    background: transparent; color: var(--text2);
+    border: 1px solid var(--border2); border-radius: 7px;
+    padding: 8px 14px; font-size: 13px;
+    cursor: pointer; font-family: 'Geist', sans-serif;
+    transition: all 0.15s;
+  }
+  .btn-download:hover { border-color: var(--text3); color: var(--text); }
+  .btn-download:disabled { opacity: 0.3; cursor: default; }
+
+  .output-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px; color: var(--text3); min-height: 1.2em;
+  }
+
+  /* tabs */
+  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tab-btn {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    padding: 6px 14px; margin-bottom: -1px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text3); cursor: pointer; transition: color 0.15s, border-color 0.15s;
+  }
+  .tab-btn:hover { color: var(--text2); }
+  .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* preview */
+  .preview-wrap {
+    display: none; flex-direction: column; align-items: center;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem;
+  }
+  .preview-wrap.active { display: flex; }
+  canvas { border-radius: 4px; max-width: 100%; }
+
+  /* gcode */
+  .gcode-output {
+    display: none; flex: 1; min-height: 420px;
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 1rem;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text2); line-height: 1.6;
+    resize: none; outline: none; overflow-y: auto;
+  }
+  .gcode-output.active { display: block; }
+</style>
+
+<div class="tool">
+
+  <div class="tool-params">
+
+    <div class="param-group">
+      <div class="param-group-label">Grid</div>
+      <div class="param-row"><label>Width (mm)</label>      <input id="width"     type="number" value="25"   step="1"></div>
+      <div class="param-row"><label>Height (mm)</label>     <input id="height"    type="number" value="25"   step="1"></div>
+      <div class="param-row"><label>Points X</label>        <input id="points_x"  type="number" value="5"    step="1" min="2"></div>
+      <div class="param-row"><label>Points Y</label>        <input id="points_y"  type="number" value="5"    step="1" min="2"></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Position</div>
+      <div class="param-row"><label>Origin X (mm)</label>   <input id="origin_x"  type="number" value="160"  step="1"></div>
+      <div class="param-row"><label>Origin Y (mm)</label>   <input id="origin_y"  type="number" value="140"  step="1"></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Print</div>
+      <div class="param-row"><label>Print height (mm)</label>    <input id="print_height"  type="number" value="0.2"   step="0.05"></div>
+      <div class="param-row"><label>Z hop (mm)</label>           <input id="z_hop"         type="number" value="5.0"   step="0.5"></div>
+      <div class="param-row"><label>Flow rate (mm³)</label>      <input id="flow_rate"     type="number" value="0.022" step="0.001"></div>
+      <div class="param-row"><label>Travel speed (mm/min)</label><input id="travel_speed"  type="number" value="600"   step="10"></div>
+      <div class="param-row"><label>Extrude speed (mm/min)</label><input id="extrude_speed" type="number" value="20"   step="5"></div>
+      <div class="param-row"><label>Pause (ms)</label>           <input id="pause_time_ms" type="number" value="3000"  step="100"></div>
+    </div>
+
+  </div>
+
+  <div class="tool-output">
+    <div class="output-actions">
+      <button class="btn-generate" onclick="generate()">Generate</button>
+      <button class="btn-download" id="btn-download" onclick="download()" disabled>Download .gcode</button>
+    </div>
+    <div class="output-meta" id="meta"></div>
+
+    <div class="tabs">
+      <button class="tab-btn active" onclick="switchTab('preview')">Preview</button>
+      <button class="tab-btn"        onclick="switchTab('gcode')">G-code</button>
+    </div>
+
+    <div class="preview-wrap active" id="tab-preview">
+      <canvas id="canvas" width="480" height="480"></canvas>
+    </div>
+    <textarea class="gcode-output" id="tab-gcode" readonly placeholder="G-code will appear here…"></textarea>
+  </div>
+
+</div>
+
+<script>
+  function val(id)    { return parseFloat(document.getElementById(id).value); }
+  function intVal(id) { return parseInt(document.getElementById(id).value, 10); }
+
+  function switchTab(name) {
+    document.querySelectorAll('.tab-btn').forEach((b, i) =>
+      b.classList.toggle('active', ['preview','gcode'][i] === name)
+    );
+    document.getElementById('tab-preview').classList.toggle('active', name === 'preview');
+    document.getElementById('tab-gcode').classList.toggle('active',   name === 'gcode');
+  }
+
+  function drawPreview(pointsX, pointsY, spacingX, spacingY) {
+    const canvas = document.getElementById('canvas');
+    const ctx    = canvas.getContext('2d');
+    const W = canvas.width, H = canvas.height;
+    const pad = 32;
+
+    ctx.fillStyle = '#0d0e10';
+    ctx.fillRect(0, 0, W, H);
+
+    const cellW = (W - pad * 2) / (pointsX - 1 || 1);
+    const cellH = (H - pad * 2) / (pointsY - 1 || 1);
+
+    for (let j = 0; j < pointsY; j++) {
+      for (let i = 0; i < pointsX; i++) {
+        const cx = pad + i * cellW;
+        const cy = pad + j * cellH;
+
+        // grid ghost dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 2, 0, Math.PI * 2);
+        ctx.fillStyle = '#2a2a3a';
+        ctx.fill();
+
+        // active dot
+        ctx.beginPath();
+        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
+        ctx.fillStyle = '#4ade80';
+        ctx.fill();
+      }
+    }
+
+    // draw travel order as faint lines
+    ctx.strokeStyle = 'rgba(74,222,128,0.12)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    let first = true;
+    for (let j = 0; j < pointsY; j++) {
+      for (let i = 0; i < pointsX; i++) {
+        const cx = pad + i * cellW;
+        const cy = pad + j * cellH;
+        if (first) { ctx.moveTo(cx, cy); first = false; }
+        else ctx.lineTo(cx, cy);
+      }
+    }
+    ctx.stroke();
+  }
+
+  function generate() {
+    const width        = val('width');
+    const height       = val('height');
+    const points_x     = intVal('points_x');
+    const points_y     = intVal('points_y');
+    const print_height = val('print_height');
+    const z_hop        = val('z_hop');
+    const flow_rate    = val('flow_rate');
+    const travel_speed = intVal('travel_speed');
+    const extrude_speed= intVal('extrude_speed');
+    const origin_x     = val('origin_x');
+    const origin_y     = val('origin_y');
+    const pause_ms     = intVal('pause_time_ms');
+
+    const spacing_x = points_x > 1 ? width  / (points_x - 1) : 0;
+    const spacing_y = points_y > 1 ? height / (points_y - 1) : 0;
+
+    const lines = [];
+    lines.push('; Generated dot matrix G-code');
+    lines.push('G90 ; absolute positioning');
+    lines.push('M82 ; absolute extrusion mode');
+    lines.push('G21 ; use mm');
+    lines.push('G28 ; home all axes');
+    lines.push('T0 ; select tool 0 - extrusor');
+    lines.push(`G1 Z${z_hop.toFixed(2)} F${travel_speed}`);
+
+    let e_total = 0;
+    for (let j = 0; j < points_y; j++) {
+      for (let i = 0; i < points_x; i++) {
+        const x = +(origin_x + Math.round(i * spacing_x * 1000) / 1000).toFixed(3);
+        const y = +(origin_y + Math.round(j * spacing_y * 1000) / 1000).toFixed(3);
+        lines.push(`; Point (${i + 1}, ${j + 1})`);
+        lines.push(`G1 Z${z_hop.toFixed(2)} F${travel_speed}`);
+        lines.push(`G1 X${x.toFixed(3)} Y${y.toFixed(3)} F${travel_speed}`);
+        lines.push(`G1 Z${print_height.toFixed(2)} F${travel_speed}`);
+        e_total += flow_rate;
+        lines.push(`G1 E${e_total.toFixed(5)} F${extrude_speed}`);
+        lines.push(`G1 Z${z_hop.toFixed(2)} F${travel_speed}`);
+        lines.push(`G4 P${pause_ms} ; wait ${pause_ms}ms`);
+      }
+    }
+    lines.push('; End of print');
+    lines.push(`G1 Z${(z_hop + 5).toFixed(2)} F${travel_speed}`);
+    lines.push('M104 S0 ; turn off hotend');
+    lines.push('M140 S0 ; turn off bed');
+    lines.push('M84 ; disable motors');
+
+    document.getElementById('tab-gcode').value = lines.join('\n');
+    document.getElementById('btn-download').disabled = false;
+    document.getElementById('meta').textContent =
+      `${points_x * points_y} dots · ${points_x} × ${points_y} · ${lines.length} lines`;
+
+    drawPreview(points_x, points_y, spacing_x, spacing_y);
+    switchTab('preview');
+  }
+
+  function download() {
+    const gcode = document.getElementById('tab-gcode').value;
+    if (!gcode) return;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([gcode], { type: 'text/plain' }));
+    a.download = 'dot-grid.gcode';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+</script>

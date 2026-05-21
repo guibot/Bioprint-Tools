@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Bioprinter Tools</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap">
+<style>
+  :root {
+    --bg: #0d0e10; --surface: #13151a; --surface2: #1a1d24;
+    --border: #252830; --border2: #2e3240;
+    --accent: #4ade80; --accent-dim: rgba(74,222,128,0.12);
+    --accent-mid: #22c55e;
+    --blue: #60a5fa; --blue-dim: rgba(96,165,250,0.1);
+    --text: #e2e4ea; --text2: #9ca3af; --text3: #6b7280;
+    --danger: #f87171;
+    --sidebar-w: 240px; --header-h: 52px;
+  }
+
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; font-family: 'Geist', sans-serif; background: var(--bg); color: var(--text); font-size: 15px; -webkit-font-smoothing: antialiased; }
+
+  /* ── LAYOUT ── */
+  #app { display: flex; height: 100vh; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  #sidebar {
+    width: var(--sidebar-w); min-width: var(--sidebar-w);
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; overflow: hidden;
+  }
+
+  #sidebar-top { padding: 18px 18px 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+
+  .logo { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .logo-icon {
+    width: 26px; height: 26px; background: var(--accent); border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; color: #000; font-weight: 800; flex-shrink: 0;
+  }
+  .logo-text { font-size: 13px; font-weight: 700; color: var(--text); }
+  .logo-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3); letter-spacing: 0.05em; }
+
+  #search-wrap { position: relative; }
+  #search-wrap svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
+  #search {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 7px; padding: 7px 10px 7px 30px;
+    font-size: 12px; color: var(--text); font-family: 'JetBrains Mono', monospace;
+    outline: none; transition: border-color 0.2s;
+  }
+  #search:focus { border-color: var(--accent); }
+  #search::placeholder { color: var(--text3); }
+
+  #nav { overflow-y: auto; flex: 1; padding: 8px 0 16px; }
+  #nav::-webkit-scrollbar { width: 3px; }
+  #nav::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+
+  .nav-item {
+    display: flex; align-items: center;
+    padding: 6px 18px;
+    font-size: 13px; color: var(--text2);
+    cursor: pointer; border-left: 2px solid transparent;
+    transition: all 0.12s; gap: 7px;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(255,255,255,0.025); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: var(--accent-dim); font-weight: 600; }
+  .nav-dot { width: 4px; height: 4px; border-radius: 50%; background: var(--border2); flex-shrink: 0; }
+  .nav-item.active .nav-dot { background: var(--accent); }
+
+  /* ── MAIN ── */
+  #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  #topbar {
+    height: var(--header-h); border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 36px; gap: 10px;
+    flex-shrink: 0; background: var(--surface);
+  }
+  .breadcrumb {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text3);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .breadcrumb .sep { color: var(--border2); }
+  .breadcrumb .current { color: var(--text2); }
+
+  #content-area { flex: 1; overflow-y: auto; }
+  #content-area::-webkit-scrollbar { width: 5px; }
+  #content-area::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+  /* ── WELCOME ── */
+  #welcome {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    height: 100%; gap: 10px;
+    color: var(--text3); text-align: center;
+  }
+  #welcome .welcome-icon {
+    width: 48px; height: 48px; background: var(--accent); border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; color: #000; font-weight: 800; margin-bottom: 6px;
+  }
+  #welcome h2 { font-size: 20px; font-weight: 700; color: var(--text); }
+  #welcome p { font-size: 13px; color: var(--text2); line-height: 1.6; }
+
+  /* ── TOOL FRAME ── */
+  #tool-frame { padding: 2.5rem 3rem; min-height: 100%; }
+
+  /* ── STATES ── */
+  #loading {
+    display: none; align-items: center; justify-content: center;
+    height: 100%; color: var(--text3);
+    font-family: 'JetBrains Mono', monospace; font-size: 12px; letter-spacing: 0.1em;
+  }
+  #loading.visible { display: flex; }
+
+  #error-msg {
+    display: none; align-items: center; justify-content: center;
+    height: 100%; flex-direction: column; gap: 6px;
+    color: var(--danger); font-family: 'JetBrains Mono', monospace; font-size: 13px;
+  }
+  #error-msg .sub { font-size: 11px; color: var(--text3); }
+  #error-msg.visible { display: flex; }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <aside id="sidebar">
+    <div id="sidebar-top">
+      <div class="logo">
+        <div class="logo-icon">B</div>
+        <div>
+          <div class="logo-text">Bioprinter</div>
+          <div class="logo-sub">tools</div>
+        </div>
+      </div>
+      <div id="search-wrap">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="search" type="text" placeholder="Search tool…">
+      </div>
+    </div>
+    <nav id="nav"></nav>
+  </aside>
+
+  <div id="main">
+    <div id="topbar">
+      <div class="breadcrumb">
+        <span>tools</span>
+        <span class="sep">/</span>
+        <span id="breadcrumb-tool" class="current">—</span>
+      </div>
+    </div>
+    <div id="content-area">
+      <div id="loading">loading…</div>
+      <div id="error-msg">
+        <span>tool not found</span>
+        <span class="sub">file missing or not yet built</span>
+      </div>
+      <div id="tool-frame">
+        <div id="welcome">
+          <div class="welcome-icon">B</div>
+          <h2>Bioprinter Tools</h2>
+          <p>Select a tool from the sidebar to get started.<br>Each tool generates G-code for the bioprinter.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+  const TOOLS = [
+    { label: 'DXF → G-code',    file: 'tools/dxf-to-gcode.html' },
+    { label: 'Dot Grid',         file: 'tools/dot-grid.html' },
+    { label: 'Grid Generator',   file: 'tools/grid-generator.html' },
+    { label: 'Image → G-code',   file: 'tools/img-to-gcode.html' },
+  ];
+
+  const nav         = document.getElementById('nav');
+  const toolFrame   = document.getElementById('tool-frame');
+  const loadingEl   = document.getElementById('loading');
+  const errorEl     = document.getElementById('error-msg');
+  const bcTool      = document.getElementById('breadcrumb-tool');
+  const searchInput = document.getElementById('search');
+
+  // build sidebar
+  TOOLS.forEach(tool => {
+    const item = document.createElement('div');
+    item.className = 'nav-item';
+    item.dataset.file  = tool.file;
+    item.dataset.label = tool.label;
+    item.innerHTML = `<span class="nav-dot"></span>${tool.label}`;
+    item.addEventListener('click', () => loadTool(item));
+    nav.appendChild(item);
+  });
+
+  function setActive(item) {
+    document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+    item.classList.add('active');
+    bcTool.textContent = item.dataset.label;
+  }
+
+  function showLoading() {
+    toolFrame.style.display  = 'none';
+    errorEl.classList.remove('visible');
+    loadingEl.classList.add('visible');
+  }
+
+  function showTool(html) {
+    loadingEl.classList.remove('visible');
+    errorEl.classList.remove('visible');
+    toolFrame.style.display = '';
+    toolFrame.innerHTML = html;
+    toolFrame.querySelectorAll('script').forEach(old => {
+      const s = document.createElement('script');
+      s.textContent = old.textContent;
+      old.replaceWith(s);
+    });
+  }
+
+  function showError() {
+    loadingEl.classList.remove('visible');
+    toolFrame.style.display = 'none';
+    errorEl.classList.add('visible');
+  }
+
+  async function loadTool(item) {
+    setActive(item);
+    showLoading();
+    try {
+      const res = await fetch(item.dataset.file);
+      if (!res.ok) throw new Error(res.status);
+      showTool(await res.text());
+    } catch {
+      showError();
+    }
+  }
+
+  // search
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.toLowerCase();
+    document.querySelectorAll('.nav-item').forEach(el => {
+      el.style.display = !q || el.dataset.label.toLowerCase().includes(q) ? '' : 'none';
+    });
+  });
+</script>
+</body>
+</html>
