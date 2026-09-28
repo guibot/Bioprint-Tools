@@ -1,14 +1,15 @@
 # Bioprinter Tools
 
-Browser-based G-code generators for extrusion bioprinters (developed for a Duet-based machine). Pick a tool, tweak the parameters, check the toolpath on a preview, and download the G-code. No install and no build step; everything runs in your browser.
+Browser-based G-code generators for extrusion bioprinters. Pick a tool, tweak the parameters, check the toolpath on a preview, and download the G-code. No install and no build step; everything runs in your browser.
+
+<p align="center">
+  <img src="heart.png" alt="Toolpath preview of a heart" height="320">
+  &nbsp;
+  <img src="heart.jpg" alt="A heart drawn with dispensed droplets" height="320">
+</p>
 
 > ⚠️ **Always check your G-code with a simulator such as [NC Viewer](https://ncviewer.com/) before printing.**
 > We are not responsible for any damage to your printer.
-
-<p align="center">
-  <img src="heart.jpg" alt="A heart drawn with dispensed droplets" width="320"><br>
-  <sub>Example: a heart drawn with dispensed droplets.</sub>
-</p>
 
 ## Tools
 
