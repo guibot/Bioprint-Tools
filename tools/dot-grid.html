@@ -225,20 +225,20 @@
   const any  = { ok: () => true };
   const GROUPS = [
     { label: 'Work area', fields: [
-      { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 300, min: 50, max: 600, step: 5, ...pos },
+      { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
       { id: 'bed_y', label: 'Bed Y', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
     ]},
     { label: 'Grid', fields: [
-      { id: 'width',    label: 'Width',  unit: 'mm', value: 25, min: 1, max: () => val('bed_x'), step: 1, ...pos },
-      { id: 'height',   label: 'Height', unit: 'mm', value: 25, min: 1, max: () => val('bed_y'), step: 1, ...pos },
+      { id: 'width',    label: 'Width',  unit: 'mm', value: 100, min: 1, max: () => val('bed_x'), step: 1, ...pos },
+      { id: 'height',   label: 'Height', unit: 'mm', value: 100, min: 1, max: () => val('bed_y'), step: 1, ...pos },
       { id: 'points_x', label: 'Points X', labels: { lines: 'Vertical lines' },   unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
         ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_x), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_x)}` },
       { id: 'points_y', label: 'Points Y', labels: { lines: 'Horizontal lines' }, unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
         ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_y)}` },
     ]},
     { label: 'Position', fields: [
-      { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 160, min: 0, max: () => val('bed_x'), step: 1, ...any },
-      { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 140, min: 0, max: () => val('bed_y'), step: 1, ...any },
+      { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 0, min: 0, max: () => val('bed_x'), step: 1, ...any },
+      { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 0, min: 0, max: () => val('bed_y'), step: 1, ...any },
     ]},
     { label: 'Print', fields: [
       // dots
