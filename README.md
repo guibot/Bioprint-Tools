@@ -20,7 +20,7 @@ Browser-based G-code generators for extrusion bioprinters. Pick a tool, tweak th
 </p>
 
 > ⚠️ **Always check your G-code with a simulator such as [NC Viewer](https://ncviewer.com/) before printing.**
-> We are not responsible for any damage to your printer.
+> This software is provided "as is", without warranty of any kind. Generated G-code must be reviewed and simulated before use. You are solely responsible for its use; the authors are not liable for damage to equipment, materials or samples, or for any injury. See [LICENSE](LICENSE).
 
 ## Tools
 
@@ -83,3 +83,7 @@ Tools are HTML fragments (`<style>` + markup + `<script>`) that `index.html` inj
 
 - [`dxf-parser`](https://github.com/gdsestimating/dxf-parser) `1.1.2`, loaded from a CDN by the DXF tool only
 - Google Fonts (JetBrains Mono, Geist), loaded by `index.html`
+
+## License
+
+[MIT](LICENSE). The software is provided "as is", without warranty of any kind.
