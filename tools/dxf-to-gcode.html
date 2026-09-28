@@ -1,7 +1,28 @@
 <script src="https://cdn.jsdelivr.net/npm/dxf-parser@1.1.2/dist/dxf-parser.js"></script>
+<script>
+/* Standalone fallback: when this file is opened directly (not through index.html) the palette
+   variables don't exist and everything renders black on white. Mirror index.html's palette then. */
+(() => {
+  if (getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()) return;
+  const s = document.createElement('style');
+  s.textContent =
+    ':root{--bg:#11141b;--surface:#171b24;--surface2:#1d222d;--border:#272d3a;--border2:#343c4e;' +
+    '--accent:#8fb3e6;--accent-dim:rgba(143,179,230,0.13);--accent-mid:#a8c5ee;--on-accent:#0f1522;' +
+    '--blue:#8fb3e6;--blue-dim:rgba(143,179,230,0.12);--green:#9ad1ab;--green-dim:rgba(154,209,171,0.14);' +
+    '--orange:#e9b98f;--orange-dim:rgba(233,185,143,0.14);--text:#dfe4ee;--text2:#a3aec2;--text3:#7b879d;--danger:#e89a9a}' +
+    '*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}' +
+    'html,body{background:var(--bg);color:var(--text);font:15px Geist,system-ui,sans-serif;-webkit-font-smoothing:antialiased}' +
+    'body{padding:2.5rem 3rem}';
+  document.head.appendChild(s);
+  const f = document.createElement('link');
+  f.rel = 'stylesheet';
+  f.href = 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap';
+  document.head.appendChild(f);
+})();
+</script>
 
 <style>
-  .tool { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; min-height: 100%; }
+  .tool { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 2rem; min-height: 100%; }
 
   .tool-params { display: flex; flex-direction: column; gap: 1.5rem; }
 
@@ -16,25 +37,52 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .param-row {
-    display: flex; align-items: center;
-    justify-content: space-between; gap: 1rem;
+  /* slider-style numeric field: drag horizontally to set, click to type */
+  .field {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 10px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
+    overflow: hidden; cursor: ew-resize; user-select: none; touch-action: pan-y;
+    transition: border-color 0.15s;
   }
+  .field::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: calc(var(--fill, 0) * 100%);
+    background: var(--accent-dim);
+    pointer-events: none;
+  }
+  .field:hover { border-color: var(--border2); }
+  .field.scrubbing, .field:focus-within { border-color: var(--accent); }
+  .field:focus-within { cursor: text; user-select: auto; }
+  .field.invalid { border-color: var(--danger); }
+  .field.invalid::before { background: rgba(232,154,154,0.12); }
 
-  .param-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
-
-  .param-row input,
-  .param-row select {
-    width: 90px;
-    background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 6px; padding: 5px 8px;
+  .field label {
+    position: relative; flex: 1; pointer-events: none;
+    font-size: 13px; color: var(--text2); white-space: nowrap;
+  }
+  .field input {
+    position: relative; width: 74px; padding: 0;
+    background: transparent; border: none; outline: none;
     font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    color: var(--text); text-align: right;
-    outline: none; transition: border-color 0.15s;
+    color: var(--text); text-align: right; cursor: inherit;
+    -moz-appearance: textfield; appearance: textfield;
   }
-  .param-row select { text-align: left; cursor: pointer; }
-  .param-row input:focus,
-  .param-row select:focus { border-color: var(--accent); }
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .field .unit {
+    position: relative; width: 40px; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3);
+  }
+  .field.select { cursor: default; }
+  .field.select label { flex: none; }
+  .field.select select {
+    position: relative; flex: 1; height: 100%; padding: 0;
+    background: transparent; border: none; outline: none; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right; text-align-last: right;
+  }
+  .field.select option { background: var(--surface2); color: var(--text); }
 
   /* file drop zone */
   .drop-zone {
@@ -53,33 +101,36 @@
   /* output */
   .tool-output { display: flex; flex-direction: column; gap: 0.75rem; }
 
-  .output-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .output-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
-  .btn-generate {
-    background: var(--accent); color: #000;
-    border: none; border-radius: 7px;
-    padding: 8px 18px; font-size: 13px; font-weight: 700;
-    cursor: pointer; font-family: 'Geist', sans-serif;
-    transition: background 0.15s;
-  }
-  .btn-generate:hover { background: var(--accent-mid); }
-  .btn-generate:disabled { opacity: 0.35; cursor: default; }
-
-  .btn-download {
+  .btn {
     background: transparent; color: var(--text2);
     border: 1px solid var(--border2); border-radius: 7px;
-    padding: 8px 14px; font-size: 13px;
+    padding: 7px 14px; font-size: 13px;
     cursor: pointer; font-family: 'Geist', sans-serif;
     transition: all 0.15s;
   }
-  .btn-download:hover { border-color: var(--text3); color: var(--text); }
-  .btn-download:disabled { opacity: 0.3; cursor: default; }
+  .btn:hover { border-color: var(--text3); color: var(--text); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn:disabled:hover { border-color: var(--border2); color: var(--text2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.primary:hover { background: var(--accent-mid); border-color: var(--accent-mid); color: var(--on-accent); }
+  .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+
+  .gcode-warning {
+    flex: 1; min-width: 0; margin: 0 0.25rem;
+    padding: 5px 10px; border-radius: 7px;
+    background: rgba(232,154,154,0.10); border: 1px solid rgba(232,154,154,0.35);
+    color: var(--danger); font-size: 11px; line-height: 1.45;
+  }
+  .gcode-warning a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 
   .output-meta {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px; color: var(--text3); min-height: 1.2em;
   }
-  .output-meta .warn { color: #ff6b35; }
+  .output-meta .error { color: var(--danger); }
+  .output-meta .warn { color: var(--orange); }
 
   .log {
     background: var(--surface2); border: 1px solid var(--border);
@@ -90,7 +141,7 @@
     max-height: 100px; overflow-y: auto;
   }
   .log.visible { display: block; }
-  .log .log-warn { color: #ff6b35; }
+  .log .log-warn { color: var(--orange); }
 
   /* tabs */
   .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
@@ -125,7 +176,7 @@
 
 <div class="tool">
 
-  <div class="tool-params">
+  <div class="tool-params" id="params">
 
     <div class="param-group">
       <div class="param-group-label">DXF File</div>
@@ -138,43 +189,47 @@
 
     <div class="param-group">
       <div class="param-group-label">Path</div>
-      <div class="param-row">
-        <label>Start from</label>
+      <div class="field select">
+        <label for="start_from">Start from</label>
         <select id="start_from">
           <option value="inner">inner</option>
           <option value="outer">outer</option>
         </select>
       </div>
-      <div class="param-row"><label>Points per arc</label><input id="resolution" type="number" value="100" step="10" min="10"></div>
+      <div class="field" data-min="10" data-max="500"><label for="resolution">Points per arc</label><input id="resolution" type="number" value="100" step="10"><span class="unit"></span></div>
     </div>
 
     <div class="param-group">
       <div class="param-group-label">Print</div>
-      <div class="param-row"><label>Temperature (°C)</label>  <input id="temperature"   type="number" value="280" step="5"></div>
-      <div class="param-row"><label>Layer height (mm)</label> <input id="layer_height"  type="number" value="0.6" step="0.1"></div>
-      <div class="param-row"><label>Print speed (mm/min)</label><input id="print_speed" type="number" value="60"  step="5"></div>
-      <div class="param-row"><label>E per mm</label>          <input id="e_per_mm"      type="number" value="0.009" step="0.001"></div>
+      <div class="field" data-min="0" data-max="400"><label for="temperature">Temperature</label><input id="temperature" type="number" value="280" step="5"><span class="unit">°C</span></div>
+      <div class="field" data-min="0.1" data-max="2"><label for="layer_height">Layer height</label><input id="layer_height" type="number" value="0.6" step="0.1"><span class="unit">mm</span></div>
+      <div class="field" data-min="5" data-max="600"><label for="print_speed">Print speed</label><input id="print_speed" type="number" value="60" step="5"><span class="unit">mm/min</span></div>
+      <div class="field" data-min="0" data-max="0.05"><label for="e_per_mm">E per mm</label><input id="e_per_mm" type="number" value="0.009" step="0.001"><span class="unit"></span></div>
     </div>
 
     <div class="param-group">
       <div class="param-group-label">Position</div>
-      <div class="param-row"><label>Bed center X (mm)</label> <input id="center_x" type="number" value="150" step="1"></div>
-      <div class="param-row"><label>Bed center Y (mm)</label> <input id="center_y" type="number" value="100" step="1"></div>
+      <div class="field" data-min="0" data-max="300"><label for="center_x">Bed center X</label><input id="center_x" type="number" value="150" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="300"><label for="center_y">Bed center Y</label><input id="center_y" type="number" value="100" step="1"><span class="unit">mm</span></div>
     </div>
 
   </div>
 
   <div class="tool-output">
     <div class="output-actions">
-      <button class="btn-generate" id="btn-generate" onclick="generate()" disabled>Generate</button>
-      <button class="btn-download" id="btn-download" onclick="download()" disabled>Download .gcode</button>
+      <button class="btn primary" id="btn-download" disabled>Download .gcode</button>
+      <button class="btn" id="btn-copy" disabled>Copy</button>
+      <div class="gcode-warning" role="alert">
+        Always check your G-code with a simulator: <a href="https://ncviewer.com/" target="_blank" rel="noopener noreferrer">https://ncviewer.com/</a><br>
+        We are not responsible for any damage to your printer.
+      </div>
     </div>
-    <div class="output-meta" id="meta"></div>
+    <div class="output-meta" id="meta">Load a DXF file to generate G-code</div>
     <div class="log" id="log"></div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('preview')">Preview</button>
-      <button class="tab-btn"        onclick="switchTab('gcode')">G-code</button>
+      <button class="tab-btn active" data-tab="preview">Preview</button>
+      <button class="tab-btn"        data-tab="gcode">G-code</button>
     </div>
 
     <div class="preview-wrap active" id="tab-preview">
@@ -186,6 +241,7 @@
 </div>
 
 <script>
+(() => {
 // ── FILE HANDLING ─────────────────────────────────────────────────────────────
 
 let dxfContent = null;
@@ -195,8 +251,7 @@ function onFileLoaded(file) {
   reader.onload = e => {
     dxfContent = e.target.result;
     document.getElementById('file-name').textContent = file.name;
-    document.getElementById('btn-generate').disabled = false;
-    document.getElementById('meta').textContent = '';
+    generate();
   };
   reader.readAsText(file);
 }
@@ -468,9 +523,7 @@ function buildGcode(points, params) {
 // ── TAB + PREVIEW ─────────────────────────────────────────────────────────────
 
 function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach((b, i) =>
-    b.classList.toggle('active', ['preview','gcode'][i] === name)
-  );
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('tab-preview').classList.toggle('active', name === 'preview');
   document.getElementById('tab-gcode').classList.toggle('active',   name === 'gcode');
 }
@@ -481,7 +534,7 @@ function drawPreview(points) {
   const W = canvas.width, H = canvas.height;
   const pad = 24;
 
-  ctx.fillStyle = '#0d0e10';
+  ctx.fillStyle = '#11141b';
   ctx.fillRect(0, 0, W, H);
 
   if (!points.length) return;
@@ -503,7 +556,7 @@ function drawPreview(points) {
 
   // path
   ctx.beginPath();
-  ctx.strokeStyle = '#4ade80';
+  ctx.strokeStyle = '#9ad1ab';
   ctx.lineWidth = 1;
   ctx.globalAlpha = 0.85;
   const [sx, sy] = toCanvas(points[0]);
@@ -519,21 +572,23 @@ function drawPreview(points) {
   const [ax, ay] = toCanvas(points[0]);
   ctx.beginPath();
   ctx.arc(ax, ay, 4, 0, Math.PI * 2);
-  ctx.fillStyle = '#4ade80';
+  ctx.fillStyle = '#9ad1ab';
   ctx.fill();
 
   // end dot
   const [bx, by] = toCanvas(points[points.length - 1]);
   ctx.beginPath();
   ctx.arc(bx, by, 4, 0, Math.PI * 2);
-  ctx.fillStyle = '#60a5fa';
+  ctx.fillStyle = '#8fb3e6';
   ctx.fill();
 }
 
 // ── MAIN ──────────────────────────────────────────────────────────────────────
 
 function generate() {
-  if (!dxfContent) return;
+  if (!dxfContent || !paramsEl.isConnected) return;
+  const error = validate();
+  if (error) { showError(error); return; }
 
   const logEl  = document.getElementById('log');
   const metaEl = document.getElementById('meta');
@@ -572,6 +627,7 @@ function generate() {
   const { gcode, pathLength, eTotal } = buildGcode(points, params);
   document.getElementById('tab-gcode').value = gcode;
   document.getElementById('btn-download').disabled = false;
+  document.getElementById('btn-copy').disabled = false;
 
   const estTime = (pathLength / (params.printSpeed / 60)).toFixed(0);
   metaEl.textContent =
@@ -585,11 +641,10 @@ function generate() {
   }
 
   drawPreview(points);
-  switchTab('preview');
 }
 
 function download() {
-  const gcode = document.getElementById('output').value;
+  const gcode = document.getElementById('tab-gcode').value;
   if (!gcode) return;
   const name = document.getElementById('file-name').textContent.replace(/\.dxf$/i, '') || 'spiral';
   const a = document.createElement('a');
@@ -598,4 +653,124 @@ function download() {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+function copyGcode() {
+  const btn = document.getElementById('btn-copy');
+  navigator.clipboard.writeText(document.getElementById('tab-gcode').value).then(
+    () => { btn.textContent = 'Copied'; },
+    () => { btn.textContent = 'Copy failed'; }
+  );
+  setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+}
+
+  // ── SLIDER FIELDS + AUTO-GENERATE ────────────────────────────────────────────
+  // Drag across a field to set its value (range from data-min / data-max); click to type.
+
+  const paramsEl = document.getElementById('params');
+  const clamp    = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const decimals = step => { const s = String(step), i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
+
+  function updateFills() {
+    document.querySelectorAll('.field[data-min]').forEach(row => {
+      const lo = parseFloat(row.dataset.min), hi = parseFloat(row.dataset.max);
+      const v  = parseFloat(row.querySelector('input').value);
+      row.style.setProperty('--fill', Number.isFinite(v) ? clamp((v - lo) / (hi - lo), 0, 1) : 0);
+    });
+  }
+
+  let rafId = 0, typeTimer = 0;
+  function generateSoon() {            // while dragging: at most once per frame
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
+  }
+
+  document.querySelectorAll('.field[data-min]').forEach(row => {
+    const input = row.querySelector('input');
+    const lo = parseFloat(row.dataset.min), hi = parseFloat(row.dataset.max);
+    const step = parseFloat(input.step) || 1;
+    row.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || document.activeElement === input) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      let dragging = false;
+
+      const onMove = ev => {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 4) return;
+          dragging = true;
+          row.classList.add('scrubbing');
+          document.body.style.userSelect = 'none';
+          document.body.style.cursor = 'ew-resize';
+        }
+        const r    = row.getBoundingClientRect();
+        const frac = clamp((ev.clientX - r.left) / r.width, 0, 1);
+        const raw  = lo + frac * (hi - lo);
+        input.value = +clamp(Math.round(raw / step) * step, lo, hi).toFixed(decimals(step));
+        updateFills();
+        generateSoon();
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        row.classList.remove('scrubbing');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        if (!dragging) { input.focus(); input.select(); }
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  });
+
+  paramsEl.addEventListener('input', e => {    // while typing: short debounce
+    if (!e.target.matches('input')) return;
+    updateFields();
+    clearTimeout(typeTimer);
+    typeTimer = setTimeout(generate, 150);
+  });
+  paramsEl.addEventListener('change', e => { if (e.target.matches('select')) generate(); });
+  function updateFields() { updateFills(); }
+
+  // Validates the visible fields; returns an error message or null.
+  function validate() {
+    const errors = [];
+    for (const [id, [hint, test]] of Object.entries(RULES)) {
+      const input = document.getElementById(id), row = input.parentElement;
+      if (row.offsetParent === null) { row.classList.remove('invalid'); continue; }   // hidden field
+      const v  = parseFloat(input.value);
+      const ok = Number.isFinite(v) && test(v);
+      row.classList.toggle('invalid', !ok);
+      if (!ok) errors.push(`${row.querySelector('label').textContent} ${input.value === '' ? 'is required' : hint}`);
+    }
+    return errors.length ? errors.join(' · ') : null;
+  }
+
+  function showError(text) {
+    const meta = document.getElementById('meta');
+    meta.textContent = '';
+    const s = document.createElement('span');
+    s.className = 'error';
+    s.textContent = text;
+    meta.appendChild(s);
+  }
+
+  const RULES = {
+    resolution:   ['must be an integer ≥ 10', v => Number.isInteger(v) && v >= 10],
+    temperature:  ['must be ≥ 0', v => v >= 0],
+    layer_height: ['must be > 0', v => v > 0],
+    print_speed:  ['must be > 0', v => v > 0],
+    e_per_mm:     ['must be ≥ 0', v => v >= 0],
+    center_x:     ['must be a number', () => true],
+    center_y:     ['must be a number', () => true],
+  };
+
+  // ── WIRING ───────────────────────────────────────────────────────────────────
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  document.getElementById('btn-download').addEventListener('click', download);
+  document.getElementById('btn-copy').addEventListener('click', copyGcode);
+  updateFills();
+})();
 </script>

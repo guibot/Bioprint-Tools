@@ -1,62 +1,95 @@
 <style>
-  .tool { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; min-height: 100%; }
+  .tool { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 2rem; min-height: 100%; align-items: start; }
+  @media (max-width: 960px) { .tool { grid-template-columns: 1fr; } }
 
-  .tool-params { display: flex; flex-direction: column; gap: 1.5rem; }
+  .tool-params, #params { display: flex; flex-direction: column; gap: 1.25rem; }
 
-  .param-group { display: flex; flex-direction: column; gap: 0.5rem; }
-
+  .param-group { display: flex; flex-direction: column; gap: 6px; }
   .param-group-label {
     font-family: 'JetBrains Mono', monospace;
     font-size: 10px; font-weight: 600;
     letter-spacing: 0.12em; text-transform: uppercase;
     color: var(--text3);
-    padding-bottom: 0.4rem;
+    padding-bottom: 0.4rem; margin-bottom: 2px;
     border-bottom: 1px solid var(--border);
   }
 
-  .param-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  .param-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
-  .param-row input {
-    width: 90px;
-    background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 6px; padding: 5px 8px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    color: var(--text); text-align: right;
-    outline: none; transition: border-color 0.15s;
+  /* slider-style numeric field: drag horizontally to set, click to type */
+  .field {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 10px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
+    overflow: hidden; cursor: ew-resize; user-select: none; touch-action: pan-y;
+    transition: border-color 0.15s;
   }
-  .param-row input:focus { border-color: var(--accent); }
+  .field::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: calc(var(--fill, 0) * 100%);
+    background: var(--accent-dim);
+    pointer-events: none;
+  }
+  .field.off { display: none; }
+  .field:hover { border-color: var(--border2); }
+  .field.scrubbing, .field:focus-within { border-color: var(--accent); }
+  .field:focus-within { cursor: text; user-select: auto; }
+  .field.invalid { border-color: var(--danger); }
+  .field.invalid::before { background: rgba(232,154,154,0.12); }
+
+  .field label {
+    position: relative; flex: 1; pointer-events: none;
+    font-size: 13px; color: var(--text2); white-space: nowrap;
+  }
+  .field input {
+    position: relative; width: 74px; padding: 0;
+    background: transparent; border: none; outline: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right; cursor: inherit;
+    -moz-appearance: textfield; appearance: textfield;
+  }
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .field .unit {
+    position: relative; width: 40px; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3);
+  }
 
   /* output panel */
-  .tool-output { display: flex; flex-direction: column; gap: 0.75rem; }
+  .tool-output { display: flex; flex-direction: column; gap: 0.75rem; min-width: 0; }
 
-  .output-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .output-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
-  .btn-generate {
-    background: var(--accent); color: #000;
-    border: none; border-radius: 7px;
-    padding: 8px 18px; font-size: 13px; font-weight: 700;
-    cursor: pointer; font-family: 'Geist', sans-serif;
-    transition: background 0.15s;
-  }
-  .btn-generate:hover { background: var(--accent-mid); }
-
-  .btn-download {
+  .btn {
     background: transparent; color: var(--text2);
     border: 1px solid var(--border2); border-radius: 7px;
-    padding: 8px 14px; font-size: 13px;
+    padding: 7px 14px; font-size: 13px;
     cursor: pointer; font-family: 'Geist', sans-serif;
     transition: all 0.15s;
   }
-  .btn-download:hover { border-color: var(--text3); color: var(--text); }
-  .btn-download:disabled { opacity: 0.3; cursor: default; }
+  .btn:hover { border-color: var(--text3); color: var(--text); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn:disabled:hover { border-color: var(--border2); color: var(--text2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.primary:hover { background: var(--accent-mid); border-color: var(--accent-mid); color: var(--on-accent); }
+  .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+
+  .gcode-warning {
+    flex: 1; min-width: 0; margin: 0 0.25rem;
+    padding: 5px 10px; border-radius: 7px;
+    background: rgba(232,154,154,0.10); border: 1px solid rgba(232,154,154,0.35);
+    color: var(--danger); font-size: 11px; line-height: 1.45;
+  }
+  .gcode-warning a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 
   .output-meta {
     font-family: 'JetBrains Mono', monospace;
-    font-size: 11px; color: var(--text3); min-height: 1.2em;
+    font-size: 11px; color: var(--text3); min-height: 1.4em;
+    display: flex; flex-wrap: wrap; gap: 4px 14px;
   }
+  .output-meta .warn  { color: var(--orange); }
+  .output-meta .error { color: var(--danger); }
 
   /* tabs */
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; align-items: flex-end; border-bottom: 1px solid var(--border); }
   .tab-btn {
     background: none; border: none; border-bottom: 2px solid transparent;
     padding: 6px 14px; margin-bottom: -1px;
@@ -65,20 +98,46 @@
   }
   .tab-btn:hover { color: var(--text2); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tabs .spacer { flex: 1; }
+
+  .seg { display: inline-flex; margin-bottom: 4px; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; }
+  .seg.hidden { display: none; }
+  .seg.wide { display: flex; margin-bottom: 0; }
+  .seg.wide button { flex: 1; padding: 7px 11px; font-size: 12px; }
+  .seg.wide button.active { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .seg button {
+    background: none; border: none; padding: 3px 11px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text3); cursor: pointer; transition: all 0.15s;
+  }
+  .seg button:hover { color: var(--text2); }
+  .seg button.active { background: var(--accent-dim); color: var(--accent); }
 
   /* preview */
   .preview-wrap {
-    display: none; flex-direction: column; align-items: center;
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 1rem;
+    display: none; flex-direction: column; align-items: center; gap: 10px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
   }
   .preview-wrap.active { display: flex; }
-  canvas { border-radius: 4px; max-width: 100%; }
+  canvas { display: block; }
+
+  .legend {
+    display: flex; gap: 16px; align-items: center;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+  .legend i.start  { background: var(--orange); }
+  .legend i.dot    { background: var(--green); }
+  .legend i.hline  { width: 14px; height: 3px; border-radius: 2px; background: var(--green); }
+  .legend i.vline  { width: 14px; height: 3px; border-radius: 2px; background: var(--accent); }
+  .legend i.travel { width: 14px; height: 2px; border-radius: 1px; background: var(--accent); opacity: 0.6; }
 
   /* gcode */
   .gcode-output {
-    display: none; flex: 1; min-height: 420px;
-    background: var(--surface2); border: 1px solid var(--border);
+    display: none; min-height: 420px; height: 60vh;
+    background: var(--surface); border: 1px solid var(--border);
     border-radius: 8px; padding: 1rem;
     font-family: 'JetBrains Mono', monospace; font-size: 12px;
     color: var(--text2); line-height: 1.6;
@@ -90,47 +149,38 @@
 <div class="tool">
 
   <div class="tool-params">
-
-    <div class="param-group">
-      <div class="param-group-label">Grid</div>
-      <div class="param-row"><label>Width (mm)</label>      <input id="width"     type="number" value="25"   step="1"></div>
-      <div class="param-row"><label>Height (mm)</label>     <input id="height"    type="number" value="25"   step="1"></div>
-      <div class="param-row"><label>Points X</label>        <input id="points_x"  type="number" value="5"    step="1" min="2"></div>
-      <div class="param-row"><label>Points Y</label>        <input id="points_y"  type="number" value="5"    step="1" min="2"></div>
+    <div class="seg wide" id="mode-seg">
+      <button data-mode="dots">Dots</button>
+      <button data-mode="lines">Lines</button>
     </div>
-
-    <div class="param-group">
-      <div class="param-group-label">Position</div>
-      <div class="param-row"><label>Origin X (mm)</label>   <input id="origin_x"  type="number" value="160"  step="1"></div>
-      <div class="param-row"><label>Origin Y (mm)</label>   <input id="origin_y"  type="number" value="140"  step="1"></div>
-    </div>
-
-    <div class="param-group">
-      <div class="param-group-label">Print</div>
-      <div class="param-row"><label>Print height (mm)</label>    <input id="print_height"  type="number" value="0.2"   step="0.05"></div>
-      <div class="param-row"><label>Z hop (mm)</label>           <input id="z_hop"         type="number" value="5.0"   step="0.5"></div>
-      <div class="param-row"><label>Flow rate (mm³)</label>      <input id="flow_rate"     type="number" value="0.022" step="0.001"></div>
-      <div class="param-row"><label>Travel speed (mm/min)</label><input id="travel_speed"  type="number" value="600"   step="10"></div>
-      <div class="param-row"><label>Extrude speed (mm/min)</label><input id="extrude_speed" type="number" value="20"   step="5"></div>
-      <div class="param-row"><label>Pause (ms)</label>           <input id="pause_time_ms" type="number" value="3000"  step="100"></div>
-    </div>
-
+    <div id="params"></div>
   </div>
 
   <div class="tool-output">
     <div class="output-actions">
-      <button class="btn-generate" onclick="generate()">Generate</button>
-      <button class="btn-download" id="btn-download" onclick="download()" disabled>Download .gcode</button>
+      <button class="btn primary" id="btn-download" disabled>Download .gcode</button>
+      <button class="btn" id="btn-copy" disabled>Copy</button>
+      <div class="gcode-warning" role="alert">
+        Always check your G-code with a simulator: <a href="https://ncviewer.com/" target="_blank" rel="noopener noreferrer">https://ncviewer.com/</a><br>
+        We are not responsible for any damage to your printer.
+      </div>
+      <button class="btn" id="btn-reset" title="Restore default parameters">Reset</button>
     </div>
     <div class="output-meta" id="meta"></div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('preview')">Preview</button>
-      <button class="tab-btn"        onclick="switchTab('gcode')">G-code</button>
+      <button class="tab-btn active" data-tab="preview">Preview</button>
+      <button class="tab-btn"        data-tab="gcode">G-code</button>
+      <span class="spacer"></span>
+      <div class="seg" id="view-seg">
+        <button data-view="bed" class="active">Work area</button>
+        <button data-view="grid">Fit grid</button>
+      </div>
     </div>
 
     <div class="preview-wrap active" id="tab-preview">
-      <canvas id="canvas" width="480" height="480"></canvas>
+      <canvas id="canvas"></canvas>
+      <div class="legend" id="legend"></div>
     </div>
     <textarea class="gcode-output" id="tab-gcode" readonly placeholder="G-code will appear here…"></textarea>
   </div>
@@ -138,65 +188,372 @@
 </div>
 
 <script>
-  function val(id)    { return parseFloat(document.getElementById(id).value); }
-  function intVal(id) { return parseInt(document.getElementById(id).value, 10); }
+(() => {
+  const STORE_KEY = 'bioprinter.dotgrid.v1';
+  const $     = id => document.getElementById(id);
+  const val   = id => parseFloat($(id).value);
+  const intVal = id => parseInt($(id).value, 10);
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const css   = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
-  function switchTab(name) {
-    document.querySelectorAll('.tab-btn').forEach((b, i) =>
-      b.classList.toggle('active', ['preview','gcode'][i] === name)
-    );
-    document.getElementById('tab-preview').classList.toggle('active', name === 'preview');
-    document.getElementById('tab-gcode').classList.toggle('active',   name === 'gcode');
+  // ── Standalone fallback ───────────────────────────────────────
+  // Opened directly (not through index.html) the palette variables don't exist and
+  // everything renders black on white. Mirror the index.html palette in that case only.
+  if (!css('--bg')) {
+    const s = document.createElement('style');
+    s.textContent =
+      ':root{--bg:#11141b;--surface:#171b24;--surface2:#1d222d;--border:#272d3a;--border2:#343c4e;' +
+      '--accent:#8fb3e6;--accent-dim:rgba(143,179,230,0.13);--accent-mid:#a8c5ee;--on-accent:#0f1522;' +
+      '--green:#9ad1ab;--orange:#e9b98f;--text:#dfe4ee;--text2:#a3aec2;--text3:#7b879d;--danger:#e89a9a}' +
+      '*,*::before,*::after{box-sizing:border-box}' +
+      'html,body{margin:0;background:var(--bg);color:var(--text);font:15px Geist,system-ui,sans-serif}' +
+      'body{padding:2.5rem 3rem}';
+    document.head.appendChild(s);
+    const f = document.createElement('link');
+    f.rel = 'stylesheet';
+    f.href = 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap';
+    document.head.appendChild(f);
   }
 
-  function drawPreview(pointsX, pointsY, spacingX, spacingY) {
-    const canvas = document.getElementById('canvas');
-    const ctx    = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height;
-    const pad = 32;
+  // ── Parameters ────────────────────────────────────────────────
+  // min/max/step define the slider; typing can still go beyond max.
+  //   modes : which print modes show the field (default both)
+  //   labels: per-mode label override        min: number, or { dots, lines }
+  //   ok/hint: validity rule (default: finite and ≥ 0)
+  const pos  = { ok: v => v > 0,  hint: 'must be > 0' };
+  const int1 = { ok: v => Number.isInteger(v) && v >= 1, hint: 'must be an integer ≥ 1' };
+  const any  = { ok: () => true };
+  const GROUPS = [
+    { label: 'Work area', fields: [
+      { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 300, min: 50, max: 600, step: 5, ...pos },
+      { id: 'bed_y', label: 'Bed Y', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
+    ]},
+    { label: 'Grid', fields: [
+      { id: 'width',    label: 'Width',  unit: 'mm', value: 25, min: 1, max: () => val('bed_x'), step: 1, ...pos },
+      { id: 'height',   label: 'Height', unit: 'mm', value: 25, min: 1, max: () => val('bed_y'), step: 1, ...pos },
+      { id: 'points_x', label: 'Points X', labels: { lines: 'Vertical lines' },   unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
+        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_x), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_x)}` },
+      { id: 'points_y', label: 'Points Y', labels: { lines: 'Horizontal lines' }, unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
+        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_y)}` },
+    ]},
+    { label: 'Position', fields: [
+      { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 160, min: 0, max: () => val('bed_x'), step: 1, ...any },
+      { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 140, min: 0, max: () => val('bed_y'), step: 1, ...any },
+    ]},
+    { label: 'Print', fields: [
+      // dots
+      { modes: ['dots'], id: 'print_height',  label: 'Print height',          unit: 'mm',     value: 0.2,   min: 0,  max: 3,     step: 0.05 },
+      { modes: ['dots'], id: 'z_hop',         label: 'Z hop',                 unit: 'mm',     value: 5.0,   min: 0,  max: 30,    step: 0.5 },
+      { modes: ['dots'], id: 'flow_rate',     label: 'Extrusion per dot (E)', unit: '',       value: 0.022, min: 0,  max: 0.2,   step: 0.001 },
+      { modes: ['dots'], id: 'travel_speed',  label: 'Travel speed',          unit: 'mm/min', value: 600,   min: 60, max: 6000,  step: 10, ...pos },
+      { modes: ['dots'], id: 'extrude_speed', label: 'Extrude speed',         unit: 'mm/min', value: 20,    min: 5,  max: 200,   step: 5,  ...pos },
+      { modes: ['dots'], id: 'pause_time_ms', label: 'Pause',                 unit: 'ms',     value: 3000,  min: 0,  max: 10000, step: 100 },
+      // lines
+      { modes: ['lines'], id: 'layer_h',      label: 'Layer height',          unit: 'mm',     value: 0.6,   min: 0.05, max: 2,   step: 0.05, ...pos },
+      { modes: ['lines'], id: 'n_layers',     label: 'Layers',                unit: '',       value: 1,     min: 1,  max: 20,    step: 1,  ...int1 },
+      { modes: ['lines'], id: 'speed_print',  label: 'Print speed',           unit: 'mm/min', value: 600,   min: 60, max: 3000,  step: 60, ...pos },
+      { modes: ['lines'], id: 'speed_travel', label: 'Travel speed',          unit: 'mm/min', value: 4800,  min: 600, max: 9000, step: 60, ...pos },
+      { modes: ['lines'], id: 'line_width',   label: 'Line width',            unit: 'mm',     value: 0.2,   min: 0.05, max: 2,   step: 0.05, ...pos },
+      { modes: ['lines'], id: 'flow',         label: 'Flow',                  unit: '%',      value: 40,    min: 1,  max: 200,   step: 1 },
+      { modes: ['lines'], id: 'temp',         label: 'Temperature',           unit: '°C',     value: 280,   min: 0,  max: 400,   step: 1 },
+      { modes: ['lines'], id: 'travel_z',     label: 'Travel Z',              unit: 'mm',     value: 2,     min: 0,  max: 20,    step: 0.1 },
+    ]},
+  ];
+  const FIELDS = GROUPS.flatMap(g => g.fields);
+  const FIELD  = Object.fromEntries(FIELDS.map(f => [f.id, f]));
+  FIELDS.forEach(f => { f.modes = f.modes || ['dots', 'lines']; });
 
-    ctx.fillStyle = '#0d0e10';
-    ctx.fillRect(0, 0, W, H);
+  let mode = 'dots';                                   // 'dots' | 'lines'
+  const fieldMin   = f => (typeof f.min === 'object' ? f.min[mode] : f.min);
+  const fieldLabel = f => (f.labels && f.labels[mode]) || f.label;
+  const active     = () => FIELDS.filter(f => f.modes.includes(mode));
 
-    const cellW = (W - pad * 2) / (pointsX - 1 || 1);
-    const cellH = (H - pad * 2) / (pointsY - 1 || 1);
+  const decimals = step => { const s = String(step), i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
+  const sliderMax = f => {
+    const lo = fieldMin(f);
+    const m  = typeof f.max === 'function' ? f.max() : f.max;
+    return Number.isFinite(m) && m > lo ? m : lo + f.step;
+  };
 
-    for (let j = 0; j < pointsY; j++) {
-      for (let i = 0; i < pointsX; i++) {
-        const cx = pad + i * cellW;
-        const cy = pad + j * cellH;
+  function loadSaved() {
+    try { return JSON.parse(localStorage.getItem(STORE_KEY)) || {}; } catch { return {}; }
+  }
+  function saveParams() {
+    try {
+      const o = { mode };
+      FIELDS.forEach(f => { o[f.id] = val(f.id); });
+      localStorage.setItem(STORE_KEY, JSON.stringify(o));
+    } catch {}
+  }
+  function clearSaved() { try { localStorage.removeItem(STORE_KEY); } catch {} }
 
-        // grid ghost dot
-        ctx.beginPath();
-        ctx.arc(cx, cy, 2, 0, Math.PI * 2);
-        ctx.fillStyle = '#2a2a3a';
-        ctx.fill();
+  // ── Build the parameter fields ────────────────────────────────
+  const paramsEl = $('params');
 
-        // active dot
-        ctx.beginPath();
-        ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-        ctx.fillStyle = '#4ade80';
-        ctx.fill();
+  function buildParams() {
+    const saved = loadSaved();
+    mode = saved.mode === 'lines' ? 'lines' : 'dots';
+    paramsEl.textContent = '';
+    GROUPS.forEach(g => {
+      const group = document.createElement('div');
+      group.className = 'param-group';
+      const title = document.createElement('div');
+      title.className = 'param-group-label';
+      title.textContent = g.label;
+      group.appendChild(title);
+      g.fields.forEach(f => {
+        const v = Number.isFinite(saved[f.id]) ? saved[f.id] : f.value;
+        const row = document.createElement('div');
+        row.className = 'field';
+        row.innerHTML =
+          `<label for="${f.id}"></label>` +
+          `<input id="${f.id}" type="number" value="${v}" step="${f.step}">` +
+          `<span class="unit">${f.unit}</span>`;
+        group.appendChild(row);
+        enableScrub(row, f);
+      });
+      paramsEl.appendChild(group);
+    });
+    applyMode();
+  }
+
+  // Show the fields of the current mode, relabel shared ones, refresh legend
+  function applyMode() {
+    document.querySelectorAll('#mode-seg button').forEach(b => b.classList.toggle('active', b.dataset.mode === mode));
+    FIELDS.forEach(f => {
+      const row = $(f.id).parentElement;
+      row.classList.toggle('off', !f.modes.includes(mode));
+      row.querySelector('label').textContent = fieldLabel(f);
+      $(f.id).min = fieldMin(f);
+    });
+    $('legend').innerHTML = mode === 'dots'
+      ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span>'
+      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span>';
+    updateFields();
+  }
+
+  // Slider fill + reflow of ranges that depend on the work area
+  function updateFields() {
+    FIELDS.forEach(f => {
+      const v = val(f.id), lo = fieldMin(f);
+      const frac = Number.isFinite(v) ? clamp((v - lo) / (sliderMax(f) - lo), 0, 1) : 0;
+      $(f.id).parentElement.style.setProperty('--fill', frac);
+    });
+  }
+
+  // Drag across a field to set its value; a plain click focuses the input for typing.
+  function enableScrub(row, f) {
+    const input = row.querySelector('input');
+    row.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || document.activeElement === input) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      let dragging = false;
+
+      const onMove = ev => {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 4) return;
+          dragging = true;
+          row.classList.add('scrubbing');
+          document.body.style.userSelect = 'none';
+          document.body.style.cursor = 'ew-resize';
+        }
+        const r    = row.getBoundingClientRect();
+        const frac = clamp((ev.clientX - r.left) / r.width, 0, 1);
+        const lo   = fieldMin(f), max = sliderMax(f);
+        const raw  = clamp(lo + frac * (max - lo), lo, max);
+        const snapped = Math.round(raw / f.step) * f.step;
+        input.value = +clamp(snapped, lo, max).toFixed(decimals(f.step));
+        updateFields();
+        generateSoon();
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        row.classList.remove('scrubbing');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        if (!dragging) { input.focus(); input.select(); }
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  }
+
+  // ── Auto-generate ─────────────────────────────────────────────
+  let rafId = 0, typeTimer = 0;
+  function generateSoon() {            // while dragging: at most once per frame
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
+  }
+  paramsEl.addEventListener('input', () => {   // while typing: short debounce
+    updateFields();
+    clearTimeout(typeTimer);
+    typeTimer = setTimeout(generate, 150);
+  });
+
+  // ── Validation ────────────────────────────────────────────────
+  // Validates the fields of the current mode; returns an error message or null.
+  function validate() {
+    const errors = [];
+    FIELDS.forEach(f => {
+      const el = $(f.id);
+      if (!f.modes.includes(mode)) { el.parentElement.classList.remove('invalid'); return; }
+      const v  = parseFloat(el.value);
+      const ok = f.ok || (x => x >= 0);
+      const valid = Number.isFinite(v) && ok(v);
+      el.parentElement.classList.toggle('invalid', !valid);
+      if (!valid) {
+        const hint = typeof f.hint === 'function' ? f.hint() : f.hint;
+        errors.push(`${fieldLabel(f)} ${el.value === '' ? 'is required' : (hint || 'must be ≥ 0')}`);
       }
+    });
+    return errors.length ? errors.join(' · ') : null;
+  }
+
+  // ── Preview ───────────────────────────────────────────────────
+  let last = null;        // last successfully generated grid
+  let view = 'bed';       // 'bed' | 'grid'
+
+  function niceStep(scale) {   // mm between axis lines, so they sit ≥ 48 px apart
+    return [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find(s => s * scale >= 48) || 500;
+  }
+
+  function draw() {
+    if (!last || !$('canvas').isConnected) return;
+    const wrap = $('tab-preview');
+    const availW = wrap.clientWidth - 24;
+    if (availW <= 0) return;                           // preview tab hidden
+
+    const { kind, bedX, bedY, width, height, ox, oy, px, py, lw } = last;
+    const gx0 = ox, gx1 = ox + width, gy0 = oy, gy1 = oy + height;
+    const outside = gx0 < 0 || gy0 < 0 || gx1 > bedX || gy1 > bedY;
+
+    // viewport in mm
+    let vx0, vy0, vx1, vy1;
+    if (view === 'grid') {
+      const m = Math.max(width, height) * 0.12;
+      [vx0, vy0, vx1, vy1] = [gx0 - m, gy0 - m, gx1 + m, gy1 + m];
+    } else {
+      const x0 = Math.min(0, gx0), y0 = Math.min(0, gy0), x1 = Math.max(bedX, gx1), y1 = Math.max(bedY, gy1);
+      const m  = Math.max(x1 - x0, y1 - y0) * 0.015;      // breathing room so edge dots aren't clipped
+      [vx0, vy0, vx1, vy1] = [x0 - m, y0 - m, x1 + m, y1 + m];
+    }
+    const vw = vx1 - vx0, vh = vy1 - vy0;
+
+    // canvas size: fit the viewport's aspect ratio into the available space
+    const ml = 40, mr = 12, mt = 12, mb = 24;
+    const maxH  = Math.max(320, window.innerHeight * 0.66);
+    const plotW = Math.max(60, Math.min(availW - ml - mr, (maxH - mt - mb) * vw / vh));
+    const plotH = plotW * vh / vw;
+    const cssW  = plotW + ml + mr, cssH = plotH + mt + mb;
+    const scale = plotW / vw;
+
+    const canvas = $('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width  = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const C = {
+      bg: css('--bg'), surface2: css('--surface2'), border: css('--border'), border2: css('--border2'),
+      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'),
+    };
+    const mapX = x => ml + (x - vx0) * scale;
+    const mapY = y => mt + plotH - (y - vy0) * scale;
+
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(ml, mt, plotW, plotH);
+
+    // bed (clipped to the plot area — in "Fit grid" it can extend past the viewport)
+    const bx0 = mapX(0), bx1 = mapX(bedX), by0 = mapY(bedY), by1 = mapY(0);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    ctx.fillStyle = C.surface2;
+    ctx.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
+
+    // axis lines (clipped to the bed)
+    const step = niceStep(scale);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx0, by0, bx1 - bx0, by1 - by0); ctx.clip();
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) { const X = Math.round(mapX(x)) + 0.5; ctx.moveTo(X, mt); ctx.lineTo(X, mt + plotH); }
+    for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) { const Y = Math.round(mapY(y)) + 0.5; ctx.moveTo(ml, Y); ctx.lineTo(ml + plotW, Y); }
+    ctx.stroke();
+    ctx.restore();
+    ctx.restore();                                     // end of plot-area clip
+
+    // tick labels
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = C.text3;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) ctx.fillText(String(x), mapX(x), mt + plotH + 6);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) ctx.fillText(String(y), ml - 6, mapY(y));
+
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    ctx.strokeStyle = C.border2;
+    ctx.strokeRect(bx0 + 0.5, by0 + 0.5, bx1 - bx0 - 1, by1 - by0 - 1);
+    ctx.restore();
+
+    // grid bounding box
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = outside ? C.orange : C.accent;
+    ctx.globalAlpha = outside ? 0.9 : 0.45;
+    ctx.strokeRect(mapX(gx0), mapY(gy1), (gx1 - gx0) * scale, (gy1 - gy0) * scale);
+    ctx.restore();
+
+    const dx = px > 1 ? width / (px - 1) : 0, dy = py > 1 ? height / (py - 1) : 0;
+
+    if (kind === 'lines') {
+      // horizontal lines (green), then vertical (blue) — same order as the G-code
+      ctx.lineWidth = clamp(lw * scale, 1.5, 5);
+      ctx.lineCap = 'round';
+      ctx.strokeStyle = C.green;
+      ctx.beginPath();
+      for (let j = 0; j < py; j++) { const Y = mapY(oy + j * dy); ctx.moveTo(mapX(gx0), Y); ctx.lineTo(mapX(gx1), Y); }
+      ctx.stroke();
+      ctx.strokeStyle = C.accent;
+      ctx.beginPath();
+      for (let i = 0; i < px; i++) { const X = mapX(ox + i * dx); ctx.moveTo(X, mapY(gy0)); ctx.lineTo(X, mapY(gy1)); }
+      ctx.stroke();
+      ctx.fillStyle = C.orange;
+      ctx.beginPath(); ctx.arc(mapX(ox), mapY(oy), 4.5, 0, Math.PI * 2); ctx.fill();
+      return;
     }
 
-    // draw travel order as faint lines
-    ctx.strokeStyle = 'rgba(74,222,128,0.12)';
-    ctx.lineWidth = 1;
+    // dots: travel order + dots
+    ctx.strokeStyle = C.accent; ctx.globalAlpha = 0.35; ctx.lineWidth = 1;
     ctx.beginPath();
-    let first = true;
-    for (let j = 0; j < pointsY; j++) {
-      for (let i = 0; i < pointsX; i++) {
-        const cx = pad + i * cellW;
-        const cy = pad + j * cellH;
-        if (first) { ctx.moveTo(cx, cy); first = false; }
-        else ctx.lineTo(cx, cy);
-      }
+    for (let j = 0; j < py; j++) for (let i = 0; i < px; i++) {
+      const X = mapX(ox + i * dx), Y = mapY(oy + j * dy);
+      if (i === 0 && j === 0) ctx.moveTo(X, Y); else ctx.lineTo(X, Y);
     }
     ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    const r = clamp(Math.min(dx, dy) * scale * 0.3, 2.5, 6);
+    ctx.fillStyle = C.green;
+    for (let j = 0; j < py; j++) for (let i = 0; i < px; i++) {
+      if (i === 0 && j === 0) continue;
+      ctx.beginPath(); ctx.arc(mapX(ox + i * dx), mapY(oy + j * dy), r, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.fillStyle = C.orange;
+    ctx.beginPath(); ctx.arc(mapX(ox), mapY(oy), r + 1, 0, Math.PI * 2); ctx.fill();
   }
 
-  function generate() {
+  // ── G-code ────────────────────────────────────────────────────
+  // Each builder reads its own inputs and returns { lines, info, geom, filename }.
+  function buildDots() {
     const width        = val('width');
     const height       = val('height');
     const points_x     = intVal('points_x');
@@ -243,22 +600,223 @@
     lines.push('M140 S0 ; turn off bed');
     lines.push('M84 ; disable motors');
 
-    document.getElementById('tab-gcode').value = lines.join('\n');
-    document.getElementById('btn-download').disabled = false;
-    document.getElementById('meta').textContent =
-      `${points_x * points_y} dots · ${points_x} × ${points_y} · ${lines.length} lines`;
-
-    drawPreview(points_x, points_y, spacing_x, spacing_y);
-    switchTab('preview');
+    return {
+      lines,
+      info: [`${points_x * points_y} dots · ${points_x} × ${points_y} · ${lines.length} lines`,
+             `pitch ${spacing_x.toFixed(2)} × ${spacing_y.toFixed(2)} mm`],
+      geom: { kind: 'dots', width, height, ox: origin_x, oy: origin_y, px: points_x, py: points_y },
+      filename: 'dot-grid.gcode',
+    };
   }
 
-  function download() {
-    const gcode = document.getElementById('tab-gcode').value;
+  // Grid lines through the same points: points_y horizontal lines spanning the width,
+  // points_x vertical lines spanning the height. Ported from grid-generator.html.
+  function buildLines() {
+    const width    = val('width');
+    const height   = val('height');
+    const nV       = intVal('points_x');
+    const nH       = intVal('points_y');
+    const startX   = val('origin_x');
+    const startY   = val('origin_y');
+    const layerH   = val('layer_h');
+    const nLayers  = intVal('n_layers');
+    const spPrint  = intVal('speed_print');
+    const spTravel = intVal('speed_travel');
+    const lw       = val('line_width');
+    const flow     = val('flow');
+    const temp     = intVal('temp');
+    const travelZ  = val('travel_z');
+
+    const lenH = width, lenV = height;
+    const spH  = nH > 1 ? height / (nH - 1) : 0;       // spacing between horizontal lines (Y)
+    const spV  = nV > 1 ? width  / (nV - 1) : 0;       // spacing between vertical lines (X)
+
+    const calcExtrusion = (length, layerH, lineWidth, flow) => {
+      const filamentD = 1.75;
+      const area = Math.PI * Math.pow(filamentD / 2, 2);
+      return (length * layerH * lineWidth * (flow / 100)) / area;
+    };
+
+    let E = 0;
+    const lines = [];
+    const fmt   = v => v.toFixed(4);
+    const fmtXY = v => v.toFixed(3);
+    const fmtZ  = v => v.toFixed(3);
+
+    lines.push(`;FLAVOR:Marlin`);
+    lines.push(`;Generated by Dot / Line Grid (lines mode)`);
+    lines.push(`;`);
+    lines.push(`;  Horizontal lines : ${nH}  |  Length: ${lenH} mm  |  Spacing Y: ${spH.toFixed(3)} mm`);
+    lines.push(`;  Vertical lines   : ${nV}  |  Length: ${lenV} mm  |  Spacing X: ${spV.toFixed(3)} mm`);
+    lines.push(`;  Layer height     : ${layerH} mm`);
+    lines.push(`;  Num layers       : ${nLayers}  |  Total height: ${(layerH * nLayers).toFixed(3)} mm`);
+    lines.push(`;  Travel height    : ${travelZ} mm`);
+    lines.push(`;  Line width       : ${lw} mm`);
+    lines.push(`;  Flow             : ${flow}%`);
+    lines.push(`;  Print speed      : ${spPrint} mm/min`);
+    lines.push(`;  Travel speed     : ${spTravel} mm/min`);
+    lines.push(``);
+    lines.push(`M104 S${temp}`);
+    lines.push(`M105`);
+    lines.push(`M109 S${temp}`);
+    lines.push(`G28`);
+    lines.push(`G1 Z${fmtZ(travelZ)} F3000`);
+    lines.push(`M82`);
+    lines.push(`G92 E0`);
+    lines.push(``);
+    lines.push(`;LAYER_COUNT:${nLayers}`);
+    lines.push(`M107`);
+    lines.push(``);
+
+    for (let layer = 0; layer < nLayers; layer++) {
+      const printZ = layerH * (layer + 1);
+      const liftZ  = printZ + travelZ;
+
+      lines.push(`;--- LAYER ${layer + 1} / ${nLayers}  (Z=${printZ.toFixed(3)} mm) ---`);
+      lines.push(`;LAYER:${layer}`);
+      lines.push(``);
+      lines.push(`;  Horizontal lines`);
+
+      for (let i = 0; i < nH; i++) {
+        const y  = startY + i * spH;
+        const x0 = startX;
+        const x1 = startX + lenH;
+        lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+        lines.push(`G0 F${spTravel} X${fmtXY(x0)} Y${fmtXY(y)}`);
+        lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+        E += calcExtrusion(lenH, layerH, lw, flow);
+        lines.push(`G1 F${spPrint} X${fmtXY(x1)} Y${fmtXY(y)} E${fmt(E)}`);
+      }
+
+      lines.push(``);
+      lines.push(`;  Vertical lines`);
+
+      for (let j = 0; j < nV; j++) {
+        const x  = startX + j * spV;
+        const y0 = startY;
+        const y1 = startY + lenV;
+        lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+        lines.push(`G0 F${spTravel} X${fmtXY(x)} Y${fmtXY(y0)}`);
+        lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+        E += calcExtrusion(lenV, layerH, lw, flow);
+        lines.push(`G1 F${spPrint} X${fmtXY(x)} Y${fmtXY(y1)} E${fmt(E)}`);
+      }
+
+      lines.push(``);
+    }
+
+    const finalZ = layerH * nLayers + travelZ;
+    lines.push(`;--- END ---`);
+    lines.push(`G0 F3000 Z${fmtZ(finalZ)}`);
+    lines.push(`M82`);
+    lines.push(`M104 S0`);
+    lines.push(`;End of Gcode`);
+
+    return {
+      lines,
+      info: [`${(nH + nV) * nLayers} strokes · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
+             `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · E total ${E.toFixed(3)}`],
+      geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw },
+      filename: `grid_${nH}h_${nV}v.gcode`,
+    };
+  }
+
+  // ── Generate ──────────────────────────────────────────────────
+  let filename = 'dot-grid.gcode';
+
+  function setMeta(parts) {
+    const meta = $('meta');
+    meta.textContent = '';
+    parts.forEach(([text, cls]) => {
+      const s = document.createElement('span');
+      if (cls) s.className = cls;
+      s.textContent = text;
+      meta.appendChild(s);
+    });
+  }
+
+  function generate() {
+    if (!paramsEl.isConnected) return;             // tool was swapped out
+    const error = validate();
+    if (error) { setMeta([[error, 'error']]); return; }
+
+    const bed_x = val('bed_x'), bed_y = val('bed_y');
+    const out   = mode === 'lines' ? buildLines() : buildDots();
+    const g     = out.geom;
+
+    document.getElementById('tab-gcode').value = out.lines.join('\n');
+    document.getElementById('btn-download').disabled = false;
+    $('btn-copy').disabled = false;
+    filename = out.filename;
+
+    const meta = out.info.map(t => [t]);
+    if (g.ox < 0 || g.oy < 0 || g.ox + g.width > bed_x || g.oy + g.height > bed_y)
+      meta.push(['⚠ grid extends beyond the work area', 'warn']);
+    setMeta(meta);
+
+    last = { ...g, bedX: bed_x, bedY: bed_y };
+    draw();
+    saveParams();
+  }
+
+  // ── UI wiring ─────────────────────────────────────────────────
+  function switchTab(name) {
+    document.querySelectorAll('.tool .tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+    $('tab-preview').classList.toggle('active', name === 'preview');
+    $('tab-gcode').classList.toggle('active',   name === 'gcode');
+    $('view-seg').classList.toggle('hidden', name !== 'preview');
+    if (name === 'preview') draw();
+  }
+  document.querySelectorAll('.tool .tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+
+  document.querySelectorAll('#view-seg button').forEach(b => b.addEventListener('click', () => {
+    view = b.dataset.view;
+    document.querySelectorAll('#view-seg button').forEach(x => x.classList.toggle('active', x === b));
+    draw();
+  }));
+
+  document.querySelectorAll('#mode-seg button').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.mode === mode) return;
+    mode = b.dataset.mode;
+    applyMode();
+    generate();
+  }));
+
+  $('btn-download').addEventListener('click', () => {
+    const gcode = $('tab-gcode').value;
     if (!gcode) return;
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([gcode], { type: 'text/plain' }));
-    a.download = 'dot-grid.gcode';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(a.href);
-  }
+  });
+
+  $('btn-copy').addEventListener('click', async () => {
+    const btn = $('btn-copy');
+    try {
+      await navigator.clipboard.writeText($('tab-gcode').value);
+      btn.textContent = 'Copied';
+    } catch {
+      btn.textContent = 'Copy failed';
+    }
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+  });
+
+  $('btn-reset').addEventListener('click', () => {
+    clearSaved();
+    buildParams();
+    generate();
+  });
+
+  new ResizeObserver(draw).observe($('tab-preview'));
+  const onResize = () => {
+    if (!paramsEl.isConnected) { window.removeEventListener('resize', onResize); return; }
+    draw();
+  };
+  window.addEventListener('resize', onResize);
+
+  buildParams();
+  generate();
+})();
 </script>

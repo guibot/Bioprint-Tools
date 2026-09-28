@@ -1,5 +1,27 @@
+<script>
+/* Standalone fallback: when this file is opened directly (not through index.html) the palette
+   variables don't exist and everything renders black on white. Mirror index.html's palette then. */
+(() => {
+  if (getComputedStyle(document.documentElement).getPropertyValue('--bg').trim()) return;
+  const s = document.createElement('style');
+  s.textContent =
+    ':root{--bg:#11141b;--surface:#171b24;--surface2:#1d222d;--border:#272d3a;--border2:#343c4e;' +
+    '--accent:#8fb3e6;--accent-dim:rgba(143,179,230,0.13);--accent-mid:#a8c5ee;--on-accent:#0f1522;' +
+    '--blue:#8fb3e6;--blue-dim:rgba(143,179,230,0.12);--green:#9ad1ab;--green-dim:rgba(154,209,171,0.14);' +
+    '--orange:#e9b98f;--orange-dim:rgba(233,185,143,0.14);--text:#dfe4ee;--text2:#a3aec2;--text3:#7b879d;--danger:#e89a9a}' +
+    '*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}' +
+    'html,body{background:var(--bg);color:var(--text);font:15px Geist,system-ui,sans-serif;-webkit-font-smoothing:antialiased}' +
+    'body{padding:2.5rem 3rem}';
+  document.head.appendChild(s);
+  const f = document.createElement('link');
+  f.rel = 'stylesheet';
+  f.href = 'https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Geist:wght@400;500;600;700&display=swap';
+  document.head.appendChild(f);
+})();
+</script>
+
 <style>
-  .tool { display: grid; grid-template-columns: 300px 1fr; gap: 2rem; min-height: 100%; }
+  .tool { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 2rem; min-height: 100%; }
 
   .tool-params { display: flex; flex-direction: column; gap: 1.5rem; }
 
@@ -14,20 +36,52 @@
     border-bottom: 1px solid var(--border);
   }
 
-  .param-row { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
-  .param-row label { font-size: 13px; color: var(--text2); white-space: nowrap; }
-  .param-row input,
-  .param-row select {
-    width: 90px;
-    background: var(--surface2); border: 1px solid var(--border2);
-    border-radius: 6px; padding: 5px 8px;
-    font-family: 'JetBrains Mono', monospace; font-size: 12px;
-    color: var(--text); text-align: right;
-    outline: none; transition: border-color 0.15s;
+  /* slider-style numeric field: drag horizontally to set, click to type */
+  .field {
+    position: relative; display: flex; align-items: center; gap: 8px;
+    height: 32px; padding: 0 10px;
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 7px;
+    overflow: hidden; cursor: ew-resize; user-select: none; touch-action: pan-y;
+    transition: border-color 0.15s;
   }
-  .param-row select { text-align: left; cursor: pointer; }
-  .param-row input:focus,
-  .param-row select:focus { border-color: var(--accent); }
+  .field::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: calc(var(--fill, 0) * 100%);
+    background: var(--accent-dim);
+    pointer-events: none;
+  }
+  .field:hover { border-color: var(--border2); }
+  .field.scrubbing, .field:focus-within { border-color: var(--accent); }
+  .field:focus-within { cursor: text; user-select: auto; }
+  .field.invalid { border-color: var(--danger); }
+  .field.invalid::before { background: rgba(232,154,154,0.12); }
+
+  .field label {
+    position: relative; flex: 1; pointer-events: none;
+    font-size: 13px; color: var(--text2); white-space: nowrap;
+  }
+  .field input {
+    position: relative; width: 74px; padding: 0;
+    background: transparent; border: none; outline: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right; cursor: inherit;
+    -moz-appearance: textfield; appearance: textfield;
+  }
+  .field input::-webkit-outer-spin-button,
+  .field input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+  .field .unit {
+    position: relative; width: 40px; pointer-events: none;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3);
+  }
+  .field.select { cursor: default; }
+  .field.select label { flex: none; }
+  .field.select select {
+    position: relative; flex: 1; height: 100%; padding: 0;
+    background: transparent; border: none; outline: none; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right; text-align-last: right;
+  }
+  .field.select option { background: var(--surface2); color: var(--text); }
 
   .drop-zone {
     border: 1px dashed var(--border2); border-radius: 8px;
@@ -43,34 +97,40 @@
 
   .tool-output { display: flex; flex-direction: column; gap: 0.75rem; }
 
-  .output-actions { display: flex; gap: 0.5rem; align-items: center; }
+  .output-actions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; }
 
-  .btn-generate {
-    background: var(--accent); color: #000;
-    border: none; border-radius: 7px;
-    padding: 8px 18px; font-size: 13px; font-weight: 700;
-    cursor: pointer; font-family: 'Geist', sans-serif;
-    transition: background 0.15s;
-  }
-  .btn-generate:hover { background: var(--accent-mid); }
-  .btn-generate:disabled { opacity: 0.35; cursor: default; }
-
-  .btn-download {
+  .btn {
     background: transparent; color: var(--text2);
     border: 1px solid var(--border2); border-radius: 7px;
-    padding: 8px 14px; font-size: 13px;
+    padding: 7px 14px; font-size: 13px;
     cursor: pointer; font-family: 'Geist', sans-serif;
     transition: all 0.15s;
   }
-  .btn-download:hover { border-color: var(--text3); color: var(--text); }
-  .btn-download:disabled { opacity: 0.3; cursor: default; }
+  .btn:hover { border-color: var(--text3); color: var(--text); }
+  .btn:disabled { opacity: 0.35; cursor: default; }
+  .btn:disabled:hover { border-color: var(--border2); color: var(--text2); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+  .btn.primary:hover { background: var(--accent-mid); border-color: var(--accent-mid); color: var(--on-accent); }
+  .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
+
+  .gcode-warning {
+    flex: 1; min-width: 0; margin: 0 0.25rem;
+    padding: 5px 10px; border-radius: 7px;
+    background: rgba(232,154,154,0.10); border: 1px solid rgba(232,154,154,0.35);
+    color: var(--danger); font-size: 11px; line-height: 1.45;
+  }
+  .gcode-warning a { color: inherit; font-weight: 600; text-underline-offset: 2px; }
 
   .output-meta {
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px; color: var(--text3); min-height: 1.2em;
   }
+  .output-meta .error { color: var(--danger); }
+  .output-meta .warn  { color: var(--orange); }
+  .output-meta { display: flex; flex-wrap: wrap; gap: 4px 14px; }
 
-  .tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+  .tabs { display: flex; align-items: flex-end; gap: 0; border-bottom: 1px solid var(--border); }
+  .tabs .spacer { flex: 1; }
   .tab-btn {
     background: none; border: none; border-bottom: 2px solid transparent;
     padding: 6px 14px; margin-bottom: -1px;
@@ -80,13 +140,38 @@
   .tab-btn:hover { color: var(--text2); }
   .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
 
+  .seg { display: inline-flex; margin-bottom: 4px; border: 1px solid var(--border2); border-radius: 6px; overflow: hidden; }
+  .seg.hidden { display: none; }
+  .seg button {
+    background: none; border: none; padding: 3px 11px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+    color: var(--text3); cursor: pointer; transition: all 0.15s;
+  }
+  .seg button:hover { color: var(--text2); }
+  .seg button.active { background: var(--accent-dim); color: var(--accent); }
+
   .preview-wrap {
-    display: none; flex-direction: column; align-items: center;
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 1rem;
+    display: none; flex-direction: row; align-items: flex-start; gap: 12px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px;
   }
   .preview-wrap.active { display: flex; }
-  canvas { border-radius: 4px; max-width: 100%; }
+  .preview-main { flex: 1; min-width: 0; display: flex; justify-content: center; }
+  canvas { display: block; }
+
+  /* imported image, shown next to the preview */
+  .thumb { display: none; flex-direction: column; align-items: center; gap: 6px; width: 104px; flex-shrink: 0; margin: 0; }
+  .thumb.visible { display: flex; }
+  .thumb-box {
+    width: 104px; height: 104px; display: flex; align-items: center; justify-content: center;
+    background: var(--bg); border: 1px solid var(--border2); border-radius: 6px; overflow: hidden;
+  }
+  .thumb-box img { max-width: 100%; max-height: 100%; object-fit: contain; }
+  .thumb figcaption {
+    max-width: 104px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3);
+  }
+  @media (max-width: 720px) { .preview-wrap { flex-direction: column-reverse; align-items: center; } }
 
   .gcode-output {
     display: none; flex: 1; min-height: 420px;
@@ -101,7 +186,7 @@
 
 <div class="tool">
 
-  <div class="tool-params">
+  <div class="tool-params" id="params">
 
     <div class="param-group">
       <div class="param-group-label">Image</div>
@@ -114,60 +199,102 @@
 
     <div class="param-group">
       <div class="param-group-label">Mode</div>
-      <div class="param-row">
-        <label>Print mode</label>
-        <select id="mode" onchange="onModeChange()">
+      <div class="field select">
+        <label for="mode">Print mode</label>
+        <select id="mode">
           <option value="dots">dots</option>
           <option value="crosshatch">crosshatch</option>
           <option value="spiral">spiral</option>
+          <option value="raster">raster (serpentine fill)</option>
+          <option value="contour">contour (outlines)</option>
+          <option value="scaffold">scaffold (multilayer)</option>
         </select>
       </div>
     </div>
 
     <div class="param-group">
-      <div class="param-group-label">Grid</div>
-      <div class="param-row"><label>Width (mm)</label>   <input id="width"    type="number" value="100" step="1"></div>
-      <div class="param-row"><label>Height (mm)</label>  <input id="height"   type="number" value="100" step="1"></div>
-      <div class="param-row"><label>Points X</label>     <input id="points_x" type="number" value="10"  step="1" min="2"></div>
-      <div class="param-row"><label>Points Y</label>     <input id="points_y" type="number" value="10"  step="1" min="2"></div>
+      <div class="param-group-label">Work area</div>
+      <div class="field" data-min="50" data-max="600"><label for="bed_x">Bed X</label><input id="bed_x" type="number" value="300" step="5"><span class="unit">mm</span></div>
+      <div class="field" data-min="50" data-max="600"><label for="bed_y">Bed Y</label><input id="bed_y" type="number" value="200" step="5"><span class="unit">mm</span></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">Image size</div>
+      <div class="field" data-min="1" data-max="@bed_x"><label for="width">Width</label><input id="width" type="number" value="100" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="1" data-max="@bed_y"><label for="height">Height</label><input id="height" type="number" value="100" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="2" data-max="100"><label for="points_x">Points X</label><input id="points_x" type="number" value="10" step="1"><span class="unit"></span></div>
+      <div class="field" data-min="2" data-max="100"><label for="points_y">Points Y</label><input id="points_y" type="number" value="10" step="1"><span class="unit"></span></div>
     </div>
 
     <div class="param-group">
       <div class="param-group-label">Position</div>
-      <div class="param-row"><label>Origin X (mm)</label> <input id="origin_x" type="number" value="0" step="1"></div>
-      <div class="param-row"><label>Origin Y (mm)</label> <input id="origin_y" type="number" value="0" step="1"></div>
+      <div class="field" data-min="0" data-max="@bed_x"><label for="origin_x">Origin X</label><input id="origin_x" type="number" value="0" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="@bed_y"><label for="origin_y">Origin Y</label><input id="origin_y" type="number" value="0" step="1"><span class="unit">mm</span></div>
+    </div>
+
+    <div class="param-group" data-modes="dots crosshatch spiral">
+      <div class="param-group-label">Extrusion</div>
+      <div class="field" data-min="0" data-max="0.2"><label for="flow_rate">Extrusion (E)</label><input id="flow_rate" type="number" value="0.05" step="0.001"><span class="unit"></span></div>
+      <div class="field" id="pause-row" data-modes="dots" data-min="0" data-max="5000"><label for="pause_ms">Pause</label><input id="pause_ms" type="number" value="100" step="50"><span class="unit">ms</span></div>
+    </div>
+
+    <div class="param-group" data-modes="raster contour scaffold">
+      <div class="param-group-label">Lines</div>
+      <div class="field" data-min="0" data-max="0.05"><label for="e_per_mm">Extrusion per mm (E)</label><input id="e_per_mm" type="number" value="0.009" step="0.001"><span class="unit"></span></div>
+      <div class="field" data-min="10" data-max="1500"><label for="print_speed">Print speed</label><input id="print_speed" type="number" value="300" step="10"><span class="unit">mm/min</span></div>
+      <div class="field" data-modes="raster scaffold" data-min="0.2" data-max="5"><label for="line_spacing">Line spacing</label><input id="line_spacing" type="number" value="1" step="0.1"><span class="unit">mm</span></div>
+      <div class="field" data-modes="raster" data-min="0" data-max="179"><label for="raster_angle">Angle</label><input id="raster_angle" type="number" value="0" step="1"><span class="unit">°</span></div>
+      <div class="field" data-modes="contour" data-min="1" data-max="10"><label for="contour_count">Outlines</label><input id="contour_count" type="number" value="2" step="1"><span class="unit"></span></div>
+    </div>
+
+    <div class="param-group" data-modes="scaffold">
+      <div class="param-group-label">Layers</div>
+      <div class="field" data-min="1" data-max="20"><label for="n_layers">Layers</label><input id="n_layers" type="number" value="4" step="1"><span class="unit"></span></div>
+      <div class="field" data-min="0.05" data-max="2"><label for="layer_h">Layer height</label><input id="layer_h" type="number" value="0.4" step="0.05"><span class="unit">mm</span></div>
+      <div class="field" data-min="1" data-max="180"><label for="angle_step">Angle step</label><input id="angle_step" type="number" value="90" step="1"><span class="unit">°</span></div>
+    </div>
+
+    <div class="param-group" id="spiral-group" data-modes="spiral" style="display:none">
+      <div class="param-group-label">Spiral</div>
+      <div class="field" data-min="1" data-max="50"><label for="spiral_turns">Turns</label><input id="spiral_turns" type="number" value="15" step="1"><span class="unit"></span></div>
+      <div class="field" data-min="10" data-max="500"><label for="spiral_steps">Steps per turn</label><input id="spiral_steps" type="number" value="120" step="10"><span class="unit"></span></div>
     </div>
 
     <div class="param-group">
       <div class="param-group-label">Print</div>
-      <div class="param-row"><label>Print height (mm)</label>  <input id="print_height" type="number" value="0.2"  step="0.05"></div>
-      <div class="param-row"><label>Z hop (mm)</label>         <input id="z_hop"        type="number" value="2.0"  step="0.5"></div>
-      <div class="param-row"><label>Flow rate (mm³)</label>    <input id="flow_rate"    type="number" value="0.05" step="0.001"></div>
-      <div class="param-row" id="pause-row"><label>Pause (ms)</label> <input id="pause_ms" type="number" value="100" step="50"></div>
-    </div>
-
-    <div class="param-group" id="spiral-group" style="display:none">
-      <div class="param-group-label">Spiral</div>
-      <div class="param-row"><label>Turns</label>          <input id="spiral_turns" type="number" value="15"  step="1"  min="1"></div>
-      <div class="param-row"><label>Steps per turn</label> <input id="spiral_steps" type="number" value="120" step="10" min="10"></div>
+      <div class="field" data-min="0" data-max="3"><label for="print_height">Print height</label><input id="print_height" type="number" value="0.2" step="0.05"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="30"><label for="z_hop">Z hop</label><input id="z_hop" type="number" value="2.0" step="0.5"><span class="unit">mm</span></div>
     </div>
 
   </div>
 
   <div class="tool-output">
     <div class="output-actions">
-      <button class="btn-generate" id="btn-generate" onclick="generate()" disabled>Generate</button>
-      <button class="btn-download" id="btn-download" onclick="download()" disabled>Download .gcode</button>
+      <button class="btn primary" id="btn-download" disabled>Download .gcode</button>
+      <button class="btn" id="btn-copy" disabled>Copy</button>
+      <div class="gcode-warning" role="alert">
+        Always check your G-code with a simulator: <a href="https://ncviewer.com/" target="_blank" rel="noopener noreferrer">https://ncviewer.com/</a><br>
+        We are not responsible for any damage to your printer.
+      </div>
     </div>
-    <div class="output-meta" id="meta"></div>
+    <div class="output-meta" id="meta">Load an image to generate G-code</div>
 
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab('preview')">Preview</button>
-      <button class="tab-btn"        onclick="switchTab('gcode')">G-code</button>
+      <button class="tab-btn active" data-tab="preview">Preview</button>
+      <button class="tab-btn"        data-tab="gcode">G-code</button>
+      <span class="spacer"></span>
+      <div class="seg" id="view-seg">
+        <button data-view="bed" class="active">Work area</button>
+        <button data-view="grid">Fit image</button>
+      </div>
     </div>
 
     <div class="preview-wrap active" id="tab-preview">
-      <canvas id="canvas" width="480" height="480"></canvas>
+      <div class="preview-main" id="preview-main"><canvas id="canvas"></canvas></div>
+      <figure class="thumb" id="thumb">
+        <div class="thumb-box"><img id="thumb-img" alt="Imported image"></div>
+        <figcaption id="thumb-name"></figcaption>
+      </figure>
     </div>
     <textarea class="gcode-output" id="tab-gcode" readonly placeholder="G-code will appear here…"></textarea>
   </div>
@@ -175,6 +302,7 @@
 </div>
 
 <script>
+(() => {
   let loadedImageSrc = null;
 
   function val(id)    { return parseFloat(document.getElementById(id).value); }
@@ -187,8 +315,11 @@
     reader.onload = e => {
       loadedImageSrc = e.target.result;
       document.getElementById('file-name').textContent = file.name;
-      document.getElementById('btn-generate').disabled = false;
-      document.getElementById('meta').textContent = '';
+      document.getElementById('thumb-img').src = loadedImageSrc;
+      document.getElementById('thumb-name').textContent = file.name;
+      document.getElementById('thumb-name').title = file.name;
+      document.getElementById('thumb').classList.add('visible');
+      generate();
     };
     reader.readAsDataURL(file);
   }
@@ -211,8 +342,9 @@
 
   function onModeChange() {
     const mode = document.getElementById('mode').value;
-    document.getElementById('spiral-group').style.display = mode === 'spiral' ? '' : 'none';
-    document.getElementById('pause-row').style.display    = mode === 'dots'   ? '' : 'none';
+    document.querySelectorAll('[data-modes]').forEach(el => {
+      el.style.display = el.dataset.modes.split(' ').includes(mode) ? '' : 'none';
+    });
   }
 
   // ── IMAGE PROCESSING ─────────────────────────────────────────────────────────
@@ -369,126 +501,382 @@
     return lines;
   }
 
-  // ── PREVIEW DRAWERS ──────────────────────────────────────────────────────────
+  // ── PATH MODES: raster / contour / scaffold ─────────────────────────────────
+  // These build a list of strokes { pts: [[x, y], …] (mm), z, hop, layer }, used for both the
+  // G-code and the preview. The image acts as a mask: pixel (i, j) covers a cell around its grid point.
 
-  function drawDotsPreview(pixels, nx, ny) {
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height, pad = 24;
-    const cw = (W - pad * 2) / (nx - 1 || 1);
-    const ch = (H - pad * 2) / (ny - 1 || 1);
-
-    ctx.fillStyle = '#0d0e10';
-    ctx.fillRect(0, 0, W, H);
-
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) {
-        const cx = pad + i * cw;
-        const cy = H - pad - j * ch;
-        if (pixels[j][i] > 0) {
-          ctx.beginPath();
-          ctx.arc(cx, cy, 5, 0, Math.PI * 2);
-          ctx.fillStyle = '#4ade80';
-          ctx.fill();
-        } else {
-          ctx.beginPath();
-          ctx.arc(cx, cy, 2, 0, Math.PI * 2);
-          ctx.fillStyle = '#2a2a3a';
-          ctx.fill();
-        }
-      }
-    }
+  function pixelMask(pixels, nx, ny, ox, oy, w, h) {
+    const sx = w / (nx - 1), sy = h / (ny - 1);
+    return (x, y) => {
+      const i = Math.round((x - ox) / sx), j = Math.round((y - oy) / sy);
+      return i >= 0 && i < nx && j >= 0 && j < ny && pixels[j][i] > 0;
+    };
   }
 
-  function drawCrosshatchPreview(pixels, nx, ny) {
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height, pad = 24;
-    const cw = (W - pad * 2) / (nx - 1 || 1);
-    const ch = (H - pad * 2) / (ny - 1 || 1);
-    const toC = (i, j) => [pad + i * cw, H - pad - j * ch];
-
-    ctx.fillStyle = '#0d0e10';
-    ctx.fillRect(0, 0, W, H);
-    ctx.lineWidth = 1;
-
-    ctx.strokeStyle = '#4ade80';
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx - 1; i++) {
-        if (pixels[j][i] > 0 && pixels[j][i+1] > 0) {
-          const [x0, y0] = toC(i, j), [x1, y1] = toC(i+1, j);
-          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        }
-      }
+  // Parallel scan lines at `angleDeg` over the image box, keeping the parts that fall on active pixels.
+  // Alternate lines run in opposite directions (serpentine).
+  function rasterStrokes(mask, ox, oy, w, h, angleDeg, spacing, ds, z, hop, layer) {
+    const th = angleDeg * Math.PI / 180;
+    const dx = Math.cos(th), dy = Math.sin(th), ux = -dy, uy = dx;
+    const cx = ox + w / 2, cy = oy + h / 2;
+    let tMin = Infinity, tMax = -Infinity, uMin = Infinity, uMax = -Infinity;
+    for (const [x, y] of [[ox, oy], [ox + w, oy], [ox, oy + h], [ox + w, oy + h]]) {
+      const t = (x - cx) * dx + (y - cy) * dy, u = (x - cx) * ux + (y - cy) * uy;
+      tMin = Math.min(tMin, t); tMax = Math.max(tMax, t);
+      uMin = Math.min(uMin, u); uMax = Math.max(uMax, u);
     }
-    ctx.strokeStyle = '#60a5fa';
-    for (let i = 0; i < nx; i++) {
-      for (let j = 0; j < ny - 1; j++) {
-        if (pixels[j][i] > 0 && pixels[j+1][i] > 0) {
-          const [x0, y0] = toC(i, j), [x1, y1] = toC(i, j+1);
-          ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
-        }
+    const eps = 1e-6, out = [];
+    let k = 0;
+    for (let u = uMin + spacing / 2; u <= uMax; u += spacing, k++) {
+      const runs = [];
+      let run = null;
+      for (let t = tMin; t <= tMax + eps; t += ds) {
+        const x = cx + dx * t + ux * u, y = cy + dy * t + uy * u;
+        const inside = x >= ox - eps && x <= ox + w + eps && y >= oy - eps && y <= oy + h + eps && mask(x, y);
+        if (inside) { if (!run) run = [[x, y], [x, y]]; else run[1] = [x, y]; }
+        else if (run) { runs.push(run); run = null; }
       }
+      if (run) runs.push(run);
+      const line = runs.filter(r => Math.hypot(r[1][0] - r[0][0], r[1][1] - r[0][1]) > eps);
+      if (k % 2) { line.reverse(); line.forEach(r => r.reverse()); }
+      line.forEach(pts => out.push({ pts, z, hop, layer }));
     }
+    return out;
   }
 
-  function drawSpiralPreview(pixels, nx, ny, ox, oy, w, h, turns, steps) {
+  // One pixel of erosion (4-neighbourhood); pixels on the image border are eroded too.
+  function erodeMask(m, nx, ny) {
+    return m.map((row, j) => row.map((v, i) =>
+      v && j > 0 && j < ny - 1 && i > 0 && i < nx - 1 && m[j-1][i] && m[j+1][i] && m[j][i-1] && m[j][i+1]));
+  }
+
+  // Marching squares on a binary grid (padded with an empty border so every outline closes).
+  // Returns closed loops as arrays of [x, y] in mm; the first point is repeated at the end.
+  function contourLoops(m, nx, ny, ox, oy, sx, sy) {
+    const at = (i, j) => i >= 0 && i < nx && j >= 0 && j < ny && m[j][i] ? 1 : 0;
+    const segs = [];
+    for (let j = -1; j < ny; j++) for (let i = -1; i < nx; i++) {
+      const idx = at(i, j) + 2 * at(i + 1, j) + 4 * at(i + 1, j + 1) + 8 * at(i, j + 1);
+      const B = [2*i + 1, 2*j], R = [2*i + 2, 2*j + 1], T = [2*i + 1, 2*j + 2], L = [2*i, 2*j + 1];
+      switch (idx) {
+        case 1: case 14: segs.push([L, B]); break;
+        case 2: case 13: segs.push([B, R]); break;
+        case 3: case 12: segs.push([L, R]); break;
+        case 4: case 11: segs.push([R, T]); break;
+        case 5:          segs.push([L, B], [R, T]); break;
+        case 6: case 9:  segs.push([B, T]); break;
+        case 7: case 8:  segs.push([L, T]); break;
+        case 10:         segs.push([B, R], [T, L]); break;
+      }
+    }
+    const key = q => q[0] + ',' + q[1];
+    const adj = new Map();
+    segs.forEach(([a, b], id) => {
+      for (const [p, q] of [[a, b], [b, a]]) {
+        const k = key(p);
+        if (!adj.has(k)) adj.set(k, []);
+        adj.get(k).push({ to: q, id });
+      }
+    });
+    const used = new Set(), loops = [];
+    segs.forEach(([a, b], id) => {
+      if (used.has(id)) return;
+      used.add(id);
+      const loop = [a, b];
+      for (;;) {
+        const e = (adj.get(key(loop[loop.length - 1])) || []).find(x => !used.has(x.id));
+        if (!e) break;
+        used.add(e.id);
+        loop.push(e.to);
+      }
+      loops.push(loop.map(([kx, ky]) => [ox + (kx / 2) * sx, oy + (ky / 2) * sy]));
+    });
+    return loops;
+  }
+
+  // Greedy order: always continue with the loop whose closest vertex is nearest to the current position,
+  // starting the loop there.
+  function orderLoops(loops, from) {
+    const rest = loops.slice(), out = [];
+    let cur = from;
+    while (rest.length) {
+      let bi = 0, bv = 0, bd = Infinity;
+      rest.forEach((lp, li) => {
+        for (let v = 0; v < lp.length - 1; v++) {
+          const d = Math.hypot(lp[v][0] - cur[0], lp[v][1] - cur[1]);
+          if (d < bd) { bd = d; bi = li; bv = v; }
+        }
+      });
+      const lp = rest.splice(bi, 1)[0];
+      const ring = lp.slice(0, -1);
+      const rotated = [...ring.slice(bv), ...ring.slice(0, bv)];
+      rotated.push(rotated[0]);
+      out.push(rotated);
+      cur = rotated[0];
+    }
+    return out;
+  }
+
+  function buildStrokes(mode, pixels, nx, ny, ox, oy, w, h, zh, zp, o) {
+    const sx = w / (nx - 1), sy = h / (ny - 1);
+    const ds = Math.max(0.05, Math.min(sx, sy) / 2);
+    const mask = pixelMask(pixels, nx, ny, ox, oy, w, h);
+
+    if (mode === 'raster') return rasterStrokes(mask, ox, oy, w, h, o.angle, o.spacing, ds, zp, zh, 0);
+
+    if (mode === 'scaffold') {
+      const out = [];
+      for (let L = 0; L < o.layers; L++)
+        out.push(...rasterStrokes(mask, ox, oy, w, h, L * o.angleStep, o.spacing, ds, zp + L * o.layerH, zh + L * o.layerH, L));
+      return out;
+    }
+
+    // contour: `count` concentric outlines, each one pixel further inside
+    let m = pixels.map(row => row.map(v => v > 0));
+    const out = [];
+    let cur = [ox, oy];
+    for (let r = 0; r < o.count; r++) {
+      const loops = orderLoops(contourLoops(m, nx, ny, ox, oy, sx, sy), cur);
+      if (!loops.length) break;
+      loops.forEach(pts => out.push({ pts, z: zp, hop: zh, layer: r }));
+      cur = loops[loops.length - 1][0];
+      m = erodeMask(m, nx, ny);
+    }
+    return out;
+  }
+
+  function strokesLength(strokes) {
+    let len = 0;
+    for (const s of strokes) for (let k = 1; k < s.pts.length; k++)
+      len += Math.hypot(s.pts[k][0] - s.pts[k-1][0], s.pts[k][1] - s.pts[k-1][1]);
+    return len;
+  }
+
+  function gcodeStrokesBody(strokes, ePerMm, speed) {
+    let E = 0;
+    const lines = [];
+    strokes.forEach((s, n) => {
+      lines.push(
+        `; Stroke ${n + 1}${s.layer ? ` (layer ${s.layer + 1})` : ''}`,
+        `G1 Z${s.hop.toFixed(2)} F1000`,
+        `G1 X${s.pts[0][0].toFixed(3)} Y${s.pts[0][1].toFixed(3)} F3000`,
+        `G1 Z${s.z.toFixed(2)} F1000`
+      );
+      for (let k = 1; k < s.pts.length; k++) {
+        E += Math.hypot(s.pts[k][0] - s.pts[k-1][0], s.pts[k][1] - s.pts[k-1][1]) * ePerMm;
+        lines.push(`G1 X${s.pts[k][0].toFixed(3)} Y${s.pts[k][1].toFixed(3)} E${E.toFixed(5)} F${speed}`);
+      }
+    });
+    if (strokes.length) lines.push(`G1 Z${strokes[strokes.length - 1].hop.toFixed(2)} F1000`);
+    return { lines, E };
+  }
+
+  // ── PREVIEW ──────────────────────────────────────────────────────────────────
+  // Everything is drawn in mm on the work area, so width / height / origin / bed size all show up.
+
+  let last = null;        // { pixels|null, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY }
+  let view = 'bed';       // 'bed' | 'grid'
+
+  const css = name => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+  function niceStep(scale) {   // mm between axis lines, so they sit ≥ 48 px apart
+    return [1, 2, 5, 10, 20, 25, 50, 100, 200, 500].find(s => s * scale >= 48) || 500;
+  }
+
+  function draw() {
+    if (!last || !document.getElementById('canvas').isConnected) return;
+    const availW = document.getElementById('preview-main').clientWidth;
+    if (availW <= 0) return;                           // preview tab hidden
+
+    const { pixels, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY } = last;
+    const gx0 = ox, gx1 = ox + w, gy0 = oy, gy1 = oy + h;
+    const outside = gx0 < 0 || gy0 < 0 || gx1 > bedX || gy1 > bedY;
+
+    // viewport in mm
+    let vx0, vy0, vx1, vy1;
+    if (view === 'grid') {
+      const m = Math.max(w, h) * 0.12;
+      [vx0, vy0, vx1, vy1] = [gx0 - m, gy0 - m, gx1 + m, gy1 + m];
+    } else {
+      const x0 = Math.min(0, gx0), y0 = Math.min(0, gy0), x1 = Math.max(bedX, gx1), y1 = Math.max(bedY, gy1);
+      const m  = Math.max(x1 - x0, y1 - y0) * 0.015;
+      [vx0, vy0, vx1, vy1] = [x0 - m, y0 - m, x1 + m, y1 + m];
+    }
+    const vw = vx1 - vx0, vh = vy1 - vy0;
+
+    // canvas size: fit the viewport's aspect ratio into the available space
+    const ml = 40, mr = 12, mt = 12, mb = 24;
+    const maxH  = Math.max(320, window.innerHeight * 0.66);
+    const plotW = Math.max(60, Math.min(availW - ml - mr, (maxH - mt - mb) * vw / vh));
+    const plotH = plotW * vh / vw;
+    const cssW  = plotW + ml + mr, cssH = plotH + mt + mb;
+    const scale = plotW / vw;
+
     const canvas = document.getElementById('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.style.width  = cssW + 'px';
+    canvas.style.height = cssH + 'px';
+    canvas.width  = Math.round(cssW * dpr);
+    canvas.height = Math.round(cssH * dpr);
     const ctx = canvas.getContext('2d');
-    const W = canvas.width, H = canvas.height, pad = 24;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    ctx.fillStyle = '#0d0e10';
-    ctx.fillRect(0, 0, W, H);
+    const C = {
+      bg: css('--bg'), surface2: css('--surface2'), border: css('--border'), border2: css('--border2'),
+      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'),
+    };
+    const mapX = x => ml + (x - vx0) * scale;
+    const mapY = y => mt + plotH - (y - vy0) * scale;
 
-    const cxP = ox + w / 2, cyP = oy + h / 2, maxR = Math.min(w, h) / 2;
-    const totalSteps = turns * steps;
-    const toC = (x, y) => [
-      pad + ((x - ox) / w) * (W - pad * 2),
-      H - pad - ((y - oy) / h) * (H - pad * 2),
-    ];
+    ctx.clearRect(0, 0, cssW, cssH);
+    ctx.fillStyle = C.bg;
+    ctx.fillRect(ml, mt, plotW, plotH);
 
-    ctx.lineWidth = 1;
-    let prevCx = null, prevCy = null;
+    // bed (clipped to the plot area — in "Fit image" it can extend past the viewport)
+    const bx0 = mapX(0), bx1 = mapX(bedX), by0 = mapY(bedY), by1 = mapY(0);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    ctx.fillStyle = C.surface2;
+    ctx.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
 
-    for (let step = 0; step <= totalSteps; step++) {
-      const t     = step / totalSteps;
-      const angle = t * turns * 2 * Math.PI;
-      const r     = t * maxR;
-      const x     = cxP + r * Math.cos(angle);
-      const y     = cyP + r * Math.sin(angle);
+    // axis lines (clipped to the bed)
+    const step = niceStep(scale);
+    ctx.save();
+    ctx.beginPath(); ctx.rect(bx0, by0, bx1 - bx0, by1 - by0); ctx.clip();
+    ctx.strokeStyle = C.border; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) { const X = Math.round(mapX(x)) + 0.5; ctx.moveTo(X, mt); ctx.lineTo(X, mt + plotH); }
+    for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) { const Y = Math.round(mapY(y)) + 0.5; ctx.moveTo(ml, Y); ctx.lineTo(ml + plotW, Y); }
+    ctx.stroke();
+    ctx.restore();
+    ctx.restore();                                     // end of plot-area clip
 
-      const xn = Math.min(1, Math.max(0, (x - ox) / w));
-      const yn = Math.min(1, Math.max(0, (y - oy) / h));
-      const pi = Math.min(nx - 1, Math.floor(xn * (nx - 1)));
-      const pj = Math.min(ny - 1, Math.floor(yn * (ny - 1)));
-      const active = pixels[pj][pi] > 0;
+    // tick labels
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.fillStyle = C.text3;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+    for (let x = Math.ceil(vx0 / step) * step; x <= vx1; x += step) ctx.fillText(String(x), mapX(x), mt + plotH + 6);
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    for (let y = Math.ceil(vy0 / step) * step; y <= vy1; y += step) ctx.fillText(String(y), ml - 6, mapY(y));
 
-      const [cx, cy] = toC(x, y);
-      if (prevCx !== null) {
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    ctx.strokeStyle = C.border2;
+    ctx.strokeRect(bx0 + 0.5, by0 + 0.5, bx1 - bx0 - 1, by1 - by0 - 1);
+    ctx.restore();
+
+    // image bounding box
+    ctx.save();
+    ctx.setLineDash([4, 4]);
+    ctx.strokeStyle = outside ? C.orange : C.accent;
+    ctx.globalAlpha = outside ? 0.9 : 0.45;
+    ctx.strokeRect(mapX(gx0), mapY(gy1), (gx1 - gx0) * scale, (gy1 - gy0) * scale);
+    ctx.restore();
+
+    const sx = nx > 1 ? w / (nx - 1) : 0, sy = ny > 1 ? h / (ny - 1) : 0;
+    const px = i => mapX(ox + i * sx), py = j => mapY(oy + j * sy);
+    const r  = clamp(Math.min(sx, sy) * scale * 0.3, 1.5, 6);
+
+    if (!pixels) {                                     // no image yet: show the sampling grid
+      ctx.fillStyle = C.border2;
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        ctx.beginPath(); ctx.arc(px(i), py(j), Math.max(1, r * 0.4), 0, Math.PI * 2); ctx.fill();
+      }
+      return;
+    }
+
+    if (last.strokes) {                                // raster / contour / scaffold: layers get different colours
+      const palette = [C.green, C.accent, C.orange];
+      const layers = [...new Set(last.strokes.map(st => st.layer))];
+      ctx.lineWidth = 1.5; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+      layers.forEach(L => {
+        ctx.strokeStyle = palette[L % palette.length];
+        ctx.globalAlpha = layers.length > 1 ? 0.75 : 0.95;
         ctx.beginPath();
-        ctx.moveTo(prevCx, prevCy);
-        ctx.lineTo(cx, cy);
-        ctx.strokeStyle = active ? 'rgba(74,222,128,0.75)' : 'rgba(74,222,128,0.07)';
+        last.strokes.filter(st => st.layer === L).forEach(st => {
+          ctx.moveTo(mapX(st.pts[0][0]), mapY(st.pts[0][1]));
+          for (let k = 1; k < st.pts.length; k++) ctx.lineTo(mapX(st.pts[k][0]), mapY(st.pts[k][1]));
+        });
         ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+      if (last.strokes.length) {
+        ctx.fillStyle = C.orange;
+        ctx.beginPath(); ctx.arc(mapX(last.strokes[0].pts[0][0]), mapY(last.strokes[0].pts[0][1]), 4, 0, Math.PI * 2); ctx.fill();
       }
-      prevCx = cx; prevCy = cy;
+      return;
+    }
+
+    if (mode === 'crosshatch') {
+      ctx.lineWidth = 1.5; ctx.lineCap = 'round';
+      ctx.strokeStyle = C.green;
+      ctx.beginPath();
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx - 1; i++)
+        if (pixels[j][i] > 0 && pixels[j][i+1] > 0) { ctx.moveTo(px(i), py(j)); ctx.lineTo(px(i+1), py(j)); }
+      ctx.stroke();
+      ctx.strokeStyle = C.accent;
+      ctx.beginPath();
+      for (let i = 0; i < nx; i++) for (let j = 0; j < ny - 1; j++)
+        if (pixels[j][i] > 0 && pixels[j+1][i] > 0) { ctx.moveTo(px(i), py(j)); ctx.lineTo(px(i), py(j+1)); }
+      ctx.stroke();
+    } else if (mode === 'spiral') {
+      const cx = ox + w / 2, cy = oy + h / 2, maxR = Math.min(w, h) / 2;
+      const total = turns * steps;
+      const on = new Path2D(), off = new Path2D();
+      let prev = null;
+      for (let k = 0; k <= total; k++) {
+        const t = k / total, a = t * turns * 2 * Math.PI, rr = t * maxR;
+        const x = cx + rr * Math.cos(a), y = cy + rr * Math.sin(a);
+        const xn = Math.min(1, Math.max(0, (x - ox) / w));
+        const yn = Math.min(1, Math.max(0, (y - oy) / h));
+        const active = pixels[Math.min(ny - 1, Math.floor(yn * (ny - 1)))][Math.min(nx - 1, Math.floor(xn * (nx - 1)))] > 0;
+        if (prev) { const path = active ? on : off; path.moveTo(mapX(prev[0]), mapY(prev[1])); path.lineTo(mapX(x), mapY(y)); }
+        prev = [x, y];
+      }
+      ctx.lineWidth = 1.2; ctx.strokeStyle = C.green;
+      ctx.globalAlpha = 0.12; ctx.stroke(off);
+      ctx.globalAlpha = 0.9;  ctx.stroke(on);
+      ctx.globalAlpha = 1;
+    } else {                                           // dots
+      for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+        ctx.beginPath();
+        if (pixels[j][i] > 0) { ctx.fillStyle = C.green;   ctx.arc(px(i), py(j), r, 0, Math.PI * 2); }
+        else                  { ctx.fillStyle = C.border2; ctx.arc(px(i), py(j), Math.max(1, r * 0.35), 0, Math.PI * 2); }
+        ctx.fill();
+      }
     }
   }
 
   // ── TABS ─────────────────────────────────────────────────────────────────────
 
   function switchTab(name) {
-    document.querySelectorAll('.tab-btn').forEach((b, i) =>
-      b.classList.toggle('active', ['preview','gcode'][i] === name)
-    );
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
     document.getElementById('tab-preview').classList.toggle('active', name === 'preview');
     document.getElementById('tab-gcode').classList.toggle('active',   name === 'gcode');
+    document.getElementById('view-seg').classList.toggle('hidden', name !== 'preview');
+    if (name === 'preview') draw();
   }
 
   // ── MAIN ─────────────────────────────────────────────────────────────────────
 
+  let genSeq = 0;
+
+  function setMeta(parts) {
+    const meta = document.getElementById('meta');
+    meta.textContent = '';
+    parts.forEach(([text, cls]) => {
+      const el = document.createElement('span');
+      if (cls) el.className = cls;
+      el.textContent = text;
+      meta.appendChild(el);
+    });
+  }
+
   async function generate() {
-    if (!loadedImageSrc) return;
+    if (!paramsEl.isConnected) return;
+    const error = validate();
+    if (error) { showError(error); return; }
+    const seq = ++genSeq;
 
     const nx      = intVal('points_x');
     const ny      = intVal('points_y');
@@ -503,24 +891,43 @@
     const mode    = document.getElementById('mode').value;
     const turns   = intVal('spiral_turns');
     const steps   = intVal('spiral_steps');
+    const isPath  = mode === 'raster' || mode === 'contour' || mode === 'scaffold';
+    const lineOpts = isPath ? {
+      angle: val('raster_angle'), spacing: val('line_spacing'), count: intVal('contour_count'),
+      layers: intVal('n_layers'), layerH: val('layer_h'), angleStep: val('angle_step'),
+    } : null;
+    const ePerMm = isPath ? val('e_per_mm') : 0;
+    const lineSpeed = isPath ? intVal('print_speed') : 0;
 
-    const btn = document.getElementById('btn-generate');
-    btn.disabled = true;
-    btn.textContent = 'Processing…';
-    document.getElementById('meta').textContent = '';
+    const bedX = val('bed_x'), bedY = val('bed_y');
+    const outside = ox < 0 || oy < 0 || ox + w > bedX || oy + h > bedY;
+
+    if (!loadedImageSrc) {                               // nothing to print yet: just show the work area
+      last = { pixels: null, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY };
+      setMeta([['Load an image to generate G-code'], ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : [])]);
+      draw();
+      return;
+    }
 
     const pixels = await processImage(loadedImageSrc, nx, ny);
+    if (seq !== genSeq) return;          // a newer run superseded this one
 
-    let bodyLines;
-    if (mode === 'crosshatch') {
+    let bodyLines, strokes = null, metaText = null;
+    if (isPath) {
+      strokes = buildStrokes(mode, pixels, nx, ny, ox, oy, w, h, zh, zp, lineOpts);
+      if (strokes.length > 20000) {
+        showError(`Too many strokes (${strokes.length}) — increase the line spacing or reduce the layers`);
+        return;
+      }
+      const body = gcodeStrokesBody(strokes, ePerMm, lineSpeed);
+      bodyLines = body.lines;
+      metaText = `${strokes.length} strokes · ${strokesLength(strokes).toFixed(1)} mm of line · E total ${body.E.toFixed(3)} · ${bodyLines.length} G-code lines`;
+    } else if (mode === 'crosshatch') {
       bodyLines = gcodeCrosshatchBody(pixels, nx, ny, ox, oy, w, h, zh, zp, fr);
-      drawCrosshatchPreview(pixels, nx, ny);
     } else if (mode === 'spiral') {
       bodyLines = gcodeSpiralBody(pixels, nx, ny, ox, oy, w, h, zh, zp, fr, turns, steps);
-      drawSpiralPreview(pixels, nx, ny, ox, oy, w, h, turns, steps);
     } else {
       bodyLines = gcodeDotsBody(pixels, nx, ny, ox, oy, w, h, zh, zp, fr, pauseMs);
-      drawDotsPreview(pixels, nx, ny);
     }
 
     const header = [
@@ -544,14 +951,14 @@
     const gcode = [...header, ...bodyLines, ...footer].join('\n');
     document.getElementById('tab-gcode').value = gcode;
     document.getElementById('btn-download').disabled = false;
+    document.getElementById('btn-copy').disabled = false;
 
     const activeCount = pixels.flat().filter(p => p > 0).length;
-    document.getElementById('meta').textContent =
-      `${activeCount} active pixels · ${nx}×${ny} grid · ${bodyLines.length} G-code lines`;
+    setMeta([[metaText || `${activeCount} active pixels · ${nx}×${ny} grid · ${bodyLines.length} G-code lines`],
+             ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : [])]);
 
-    btn.disabled = false;
-    btn.textContent = 'Generate';
-    switchTab('preview');
+    last = { pixels, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY, strokes };
+    draw();
   }
 
   function download() {
@@ -563,4 +970,163 @@
     a.click();
     URL.revokeObjectURL(a.href);
   }
+
+  function copyGcode() {
+    const btn = document.getElementById('btn-copy');
+    navigator.clipboard.writeText(document.getElementById('tab-gcode').value).then(
+      () => { btn.textContent = 'Copied'; },
+      () => { btn.textContent = 'Copy failed'; }
+    );
+    setTimeout(() => { btn.textContent = 'Copy'; }, 1200);
+  }
+
+  // ── SLIDER FIELDS + AUTO-GENERATE ────────────────────────────────────────────
+  // Drag across a field to set its value (range from data-min / data-max); click to type.
+
+  const paramsEl = document.getElementById('params');
+  const clamp    = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const decimals = step => { const s = String(step), i = s.indexOf('.'); return i < 0 ? 0 : s.length - i - 1; };
+
+  // slider range of a field; data-max="@id" follows another field's value (e.g. the bed size)
+  function rangeOf(row) {
+    const lo = parseFloat(row.dataset.min);
+    const hi = row.dataset.max[0] === '@'
+      ? parseFloat(document.getElementById(row.dataset.max.slice(1)).value)
+      : parseFloat(row.dataset.max);
+    return [lo, Number.isFinite(hi) && hi > lo ? hi : lo + 1];
+  }
+
+  function updateFills() {
+    document.querySelectorAll('.field[data-min]').forEach(row => {
+      const [lo, hi] = rangeOf(row);
+      const v  = parseFloat(row.querySelector('input').value);
+      row.style.setProperty('--fill', Number.isFinite(v) ? clamp((v - lo) / (hi - lo), 0, 1) : 0);
+    });
+  }
+
+  let rafId = 0, typeTimer = 0;
+  function generateSoon() {            // while dragging: at most once per frame
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
+  }
+
+  document.querySelectorAll('.field[data-min]').forEach(row => {
+    const input = row.querySelector('input');
+    const step = parseFloat(input.step) || 1;
+    row.addEventListener('pointerdown', e => {
+      if (e.button !== 0 || document.activeElement === input) return;
+      e.preventDefault();
+      const startX = e.clientX;
+      let dragging = false;
+
+      const onMove = ev => {
+        if (!dragging) {
+          if (Math.abs(ev.clientX - startX) < 4) return;
+          dragging = true;
+          row.classList.add('scrubbing');
+          document.body.style.userSelect = 'none';
+          document.body.style.cursor = 'ew-resize';
+        }
+        const [lo, hi] = rangeOf(row);
+        const r    = row.getBoundingClientRect();
+        const frac = clamp((ev.clientX - r.left) / r.width, 0, 1);
+        const raw  = lo + frac * (hi - lo);
+        input.value = +clamp(Math.round(raw / step) * step, lo, hi).toFixed(decimals(step));
+        updateFills();
+        generateSoon();
+      };
+      const onUp = () => {
+        window.removeEventListener('pointermove', onMove);
+        window.removeEventListener('pointerup', onUp);
+        window.removeEventListener('pointercancel', onUp);
+        row.classList.remove('scrubbing');
+        document.body.style.userSelect = '';
+        document.body.style.cursor = '';
+        if (!dragging) { input.focus(); input.select(); }
+      };
+      window.addEventListener('pointermove', onMove);
+      window.addEventListener('pointerup', onUp);
+      window.addEventListener('pointercancel', onUp);
+    });
+  });
+
+  paramsEl.addEventListener('input', e => {    // while typing: short debounce
+    if (!e.target.matches('input')) return;
+    updateFields();
+    clearTimeout(typeTimer);
+    typeTimer = setTimeout(generate, 150);
+  });
+  paramsEl.addEventListener('change', e => { if (e.target.matches('select')) generate(); });
+  function updateFields() { updateFills(); }
+
+  // Validates the visible fields; returns an error message or null.
+  function validate() {
+    const errors = [];
+    for (const [id, [hint, test]] of Object.entries(RULES)) {
+      const input = document.getElementById(id), row = input.parentElement;
+      if (row.offsetParent === null) { row.classList.remove('invalid'); continue; }   // hidden field
+      const v  = parseFloat(input.value);
+      const ok = Number.isFinite(v) && test(v);
+      row.classList.toggle('invalid', !ok);
+      if (!ok) errors.push(`${row.querySelector('label').textContent} ${input.value === '' ? 'is required' : hint}`);
+    }
+    return errors.length ? errors.join(' · ') : null;
+  }
+
+  function showError(text) {
+    const meta = document.getElementById('meta');
+    meta.textContent = '';
+    const s = document.createElement('span');
+    s.className = 'error';
+    s.textContent = text;
+    meta.appendChild(s);
+  }
+
+  const RULES = {
+    bed_x:        ['must be > 0', v => v > 0],
+    bed_y:        ['must be > 0', v => v > 0],
+    width:        ['must be > 0', v => v > 0],
+    height:       ['must be > 0', v => v > 0],
+    points_x:     ['must be an integer ≥ 2', v => Number.isInteger(v) && v >= 2],
+    points_y:     ['must be an integer ≥ 2', v => Number.isInteger(v) && v >= 2],
+    origin_x:     ['must be a number', () => true],
+    origin_y:     ['must be a number', () => true],
+    print_height: ['must be ≥ 0', v => v >= 0],
+    z_hop:        ['must be ≥ 0', v => v >= 0],
+    flow_rate:    ['must be ≥ 0', v => v >= 0],
+    pause_ms:     ['must be ≥ 0', v => v >= 0],
+    e_per_mm:     ['must be ≥ 0', v => v >= 0],
+    print_speed:  ['must be > 0', v => v > 0],
+    line_spacing: ['must be ≥ 0.05', v => v >= 0.05],
+    raster_angle: ['must be a number', () => true],
+    contour_count:['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
+    n_layers:     ['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
+    layer_h:      ['must be > 0', v => v > 0],
+    angle_step:   ['must be a number', () => true],
+    spiral_turns: ['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
+    spiral_steps: ['must be an integer ≥ 10', v => Number.isInteger(v) && v >= 10],
+  };
+
+  // ── WIRING ───────────────────────────────────────────────────────────────────
+
+  document.querySelectorAll('.tab-btn').forEach(b => b.addEventListener('click', () => switchTab(b.dataset.tab)));
+  document.getElementById('btn-download').addEventListener('click', download);
+  document.getElementById('btn-copy').addEventListener('click', copyGcode);
+  document.getElementById('mode').addEventListener('change', onModeChange);   // runs before the auto-generate handler
+  document.querySelectorAll('#view-seg button').forEach(b => b.addEventListener('click', () => {
+    view = b.dataset.view;
+    document.querySelectorAll('#view-seg button').forEach(x => x.classList.toggle('active', x === b));
+    draw();
+  }));
+  new ResizeObserver(draw).observe(document.getElementById('preview-main'));
+  const onResize = () => {
+    if (!paramsEl.isConnected) { window.removeEventListener('resize', onResize); return; }
+    draw();
+  };
+  window.addEventListener('resize', onResize);
+
+  onModeChange();
+  updateFills();
+  generate();                                          // draws the empty work area
+})();
 </script>
