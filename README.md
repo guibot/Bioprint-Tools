@@ -3,6 +3,17 @@
 Browser-based G-code generators for extrusion bioprinters. Pick a tool, tweak the parameters, check the toolpath on a preview, and download the G-code. No install and no build step; everything runs in your browser.
 
 <p align="center">
+  <a href="https://guibot.github.io/Bioprint-Tools/">
+    <img src="Bioprinter_tools.png" alt="Screenshot of Bioprinter Tools: parameters on the left, work-area preview on the right" width="760">
+  </a>
+</p>
+
+<p align="center">
+  <b>Try it live:</b> a fully working version of the app runs in your browser at<br>
+  <a href="https://guibot.github.io/Bioprint-Tools/">https://guibot.github.io/Bioprint-Tools/</a>
+</p>
+
+<p align="center">
   <img src="heart.png" alt="Toolpath preview of a heart" height="320">
   &nbsp;
   <img src="heart.jpg" alt="A heart drawn with dispensed droplets" height="320">
