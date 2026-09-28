@@ -5,6 +5,11 @@ Browser-based G-code generators for extrusion bioprinters (developed for a Duet-
 > ⚠️ **Always check your G-code with a simulator such as [NC Viewer](https://ncviewer.com/) before printing.**
 > We are not responsible for any damage to your printer.
 
+<p align="center">
+  <img src="heart.jpg" alt="A heart drawn with dispensed droplets" width="320"><br>
+  <sub>Example: a heart drawn with dispensed droplets.</sub>
+</p>
+
 ## Tools
 
 | Tool | What it does |
