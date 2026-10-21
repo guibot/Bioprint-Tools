@@ -14,6 +14,9 @@
     border-bottom: 1px solid var(--border);
   }
 
+  .check { display: flex; align-items: center; gap: 8px; height: 28px; font-size: 13px; color: var(--text2); cursor: pointer; user-select: none; }
+  .check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
+
   /* slider-style numeric field: drag horizontally to set, click to type */
   .field {
     position: relative; display: flex; align-items: center; gap: 8px;
@@ -129,6 +132,7 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
   .legend i.start  { background: var(--orange); }
+  .legend i.purge  { background: var(--danger); }
   .legend i.dot    { background: var(--green); }
   .legend i.hline  { width: 14px; height: 3px; border-radius: 2px; background: var(--green); }
   .legend i.vline  { width: 14px; height: 3px; border-radius: 2px; background: var(--accent); }
@@ -164,6 +168,9 @@
         Always check your G-code with a simulator: <a href="https://ncviewer.com/" target="_blank" rel="noopener noreferrer">https://ncviewer.com/</a><br>
         Provided as is, without warranty. You use it at your own risk; the authors are not liable for any damage or injury.
       </div>
+      <button class="btn" id="btn-export" title="Save the current parameters as a .json file">Export settings</button>
+      <button class="btn" id="btn-load" title="Load parameters from a .json file">Load settings</button>
+      <input type="file" id="settings-file" accept=".json,application/json" hidden>
       <button class="btn" id="btn-reset" title="Restore default parameters">Reset</button>
     </div>
     <div class="output-meta" id="meta"></div>
@@ -240,6 +247,14 @@
       { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 0, min: 0, max: () => val('bed_x'), step: 1, ...any },
       { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 0, min: 0, max: () => val('bed_y'), step: 1, ...any },
     ]},
+    { label: 'Pre-extrude', fields: [
+      { id: 'pre_z',     label: 'Raise Z to',        unit: 'mm',     value: 20, min: 10, max: 60, step: 1,
+        ok: v => v >= 10, hint: 'must be ≥ 10' },
+      { id: 'pre_x',     label: 'Purge X',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_x'), step: 1, ...any },
+      { id: 'pre_y',     label: 'Purge Y',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_y'), step: 1, ...any },
+      { id: 'pre_len',   label: 'Pre-extrude',       unit: 'mm',     value: 1,  min: 0,  max: 20,  step: 0.1 },
+      { id: 'pre_speed', label: 'Pre-extrude speed', unit: 'mm/min', value: 20, min: 5,  max: 600, step: 5, ...pos },
+    ]},
     { label: 'Print', fields: [
       // dots
       { modes: ['dots'], id: 'print_height',  label: 'Print height',          unit: 'mm',     value: 0.2,   min: 0,  max: 3,     step: 0.05 },
@@ -282,8 +297,14 @@
     try {
       const o = { mode };
       FIELDS.forEach(f => { o[f.id] = val(f.id); });
+      o.pre_on = preOn();
       localStorage.setItem(STORE_KEY, JSON.stringify(o));
     } catch {}
+  }
+  const preOn  = () => !!$('pre_on') && $('pre_on').checked;
+  const isPre  = f => f.id.startsWith('pre_');
+  function applyPre() {                      // pre-extrude fields only show while the checkbox is on
+    FIELDS.filter(isPre).forEach(f => $(f.id).parentElement.classList.toggle('off', !preOn()));
   }
   function clearSaved() { try { localStorage.removeItem(STORE_KEY); } catch {} }
 
@@ -301,6 +322,12 @@
       title.className = 'param-group-label';
       title.textContent = g.label;
       group.appendChild(title);
+      if (g.label === 'Pre-extrude') {
+        const c = document.createElement('label');
+        c.className = 'check';
+        c.innerHTML = `<input id="pre_on" type="checkbox"${saved.pre_on === false ? '' : ' checked'}> Pre-extrude before printing`;
+        group.appendChild(c);
+      }
       g.fields.forEach(f => {
         const v = Number.isFinite(saved[f.id]) ? saved[f.id] : f.value;
         const row = document.createElement('div');
@@ -326,9 +353,10 @@
       row.querySelector('label').textContent = fieldLabel(f);
       $(f.id).min = fieldMin(f);
     });
+    applyPre();
     $('legend').innerHTML = mode === 'dots'
-      ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span>'
-      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span>';
+      ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span><span><i class="purge"></i>pre-extrude</span>'
+      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="purge"></i>pre-extrude</span>';
     updateFields();
   }
 
@@ -388,6 +416,7 @@
     if (rafId) return;
     rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
   }
+  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') { applyPre(); generate(); } });
   paramsEl.addEventListener('input', () => {   // while typing: short debounce
     updateFields();
     clearTimeout(typeTimer);
@@ -400,7 +429,7 @@
     const errors = [];
     FIELDS.forEach(f => {
       const el = $(f.id);
-      if (!f.modes.includes(mode)) { el.parentElement.classList.remove('invalid'); return; }
+      if (!f.modes.includes(mode) || (isPre(f) && !preOn())) { el.parentElement.classList.remove('invalid'); return; }
       const v  = parseFloat(el.value);
       const ok = f.ok || (x => x >= 0);
       const valid = Number.isFinite(v) && ok(v);
@@ -462,7 +491,7 @@
 
     const C = {
       bg: css('--bg'), surface2: css('--surface2'), border: css('--border'), border2: css('--border2'),
-      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'),
+      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'), danger: css('--danger'),
     };
     const mapX = x => ml + (x - vx0) * scale;
     const mapY = y => mt + plotH - (y - vy0) * scale;
@@ -502,6 +531,17 @@
     ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
     ctx.strokeStyle = C.border2;
     ctx.strokeRect(bx0 + 0.5, by0 + 0.5, bx1 - bx0 - 1, by1 - by0 - 1);
+    ctx.restore();
+
+    // pre-extrude spot
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    if (last.preOn) {
+    ctx.strokeStyle = ctx.fillStyle = C.danger;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mapX(last.preX), mapY(last.preY), 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.fill();
+    }
     ctx.restore();
 
     // grid bounding box
@@ -552,6 +592,17 @@
   }
 
   // ── G-code ────────────────────────────────────────────────────
+  // Raise Z, go to the purge spot, extrude `pre_len` mm of E. Returns the E total afterwards.
+  function preExtrude(lines, travelSpeed) {
+    if (!preOn()) return 0;
+    const z = val('pre_z'), x = val('pre_x'), y = val('pre_y'), len = val('pre_len'), sp = intVal('pre_speed');
+    lines.push('; Pre-extrude');
+    lines.push(`G1 Z${z.toFixed(2)} F${travelSpeed}`);
+    lines.push(`G1 X${x.toFixed(3)} Y${y.toFixed(3)} F${travelSpeed}`);
+    if (len > 0) lines.push(`G1 E${len.toFixed(5)} F${sp} ; pre-extrude ${len} mm`);
+    return len;
+  }
+
   // Each builder reads its own inputs and returns { lines, info, geom, filename }.
   function buildDots() {
     const width        = val('width');
@@ -577,9 +628,9 @@
     lines.push('G21 ; use mm');
     lines.push('G28 ; home all axes');
     lines.push('T0 ; select tool 0 - extrusor');
+    let e_total = preExtrude(lines, travel_speed);
     lines.push(`G1 Z${z_hop.toFixed(2)} F${travel_speed}`);
 
-    let e_total = 0;
     for (let j = 0; j < points_y; j++) {
       for (let i = 0; i < points_x; i++) {
         const x = +(origin_x + Math.round(i * spacing_x * 1000) / 1000).toFixed(3);
@@ -663,6 +714,7 @@
     lines.push(`G1 Z${fmtZ(travelZ)} F3000`);
     lines.push(`M82`);
     lines.push(`G92 E0`);
+    E = preExtrude(lines, spTravel);
     lines.push(``);
     lines.push(`;LAYER_COUNT:${nLayers}`);
     lines.push(`M107`);
@@ -751,9 +803,12 @@
     const meta = out.info.map(t => [t]);
     if (g.ox < 0 || g.oy < 0 || g.ox + g.width > bed_x || g.oy + g.height > bed_y)
       meta.push(['⚠ grid extends beyond the work area', 'warn']);
+    const preX = val('pre_x'), preY = val('pre_y');
+    if (preOn() && (preX < 0 || preY < 0 || preX > bed_x || preY > bed_y))
+      meta.push(['⚠ pre-extrude spot is outside the work area', 'warn']);
     setMeta(meta);
 
-    last = { ...g, bedX: bed_x, bedY: bed_y };
+    last = { ...g, bedX: bed_x, bedY: bed_y, preX, preY, preOn: preOn() };
     draw();
     saveParams();
   }
@@ -806,6 +861,34 @@
     clearSaved();
     buildParams();
     generate();
+  });
+
+  // Settings as a .json file: same shape as what is kept in localStorage.
+  $('btn-export').addEventListener('click', () => {
+    const o = { tool: 'dot-grid', mode, pre_on: preOn() };
+    FIELDS.forEach(f => { o[f.id] = val(f.id); });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 2)], { type: 'application/json' }));
+    a.download = 'dot-grid-settings.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  $('btn-load').addEventListener('click', () => $('settings-file').click());
+  $('settings-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const o = JSON.parse(await file.text());
+      if (!o || typeof o !== 'object' || (o.tool && o.tool !== 'dot-grid')) throw new Error('not a Dot / Line Grid settings file');
+      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false };
+      FIELDS.forEach(f => { if (Number.isFinite(o[f.id])) clean[f.id] = o[f.id]; });
+      localStorage.setItem(STORE_KEY, JSON.stringify(clean));
+      buildParams();
+      generate();
+    } catch (err) {
+      setMeta([['Could not load settings: ' + err.message, 'error']]);
+    }
   });
 
   new ResizeObserver(draw).observe($('tab-preview'));

@@ -37,6 +37,9 @@
   }
 
   /* slider-style numeric field: drag horizontally to set, click to type */
+  .check { display: flex; align-items: center; gap: 8px; height: 28px; font-size: 13px; color: var(--text2); cursor: pointer; user-select: none; }
+  .check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
+
   .field {
     position: relative; display: flex; align-items: center; gap: 8px;
     height: 32px; padding: 0 10px;
@@ -261,6 +264,16 @@
     </div>
 
     <div class="param-group">
+      <div class="param-group-label">Pre-extrude</div>
+      <label class="check"><input id="pre_on" type="checkbox" checked> Pre-extrude before printing</label>
+      <div class="field" data-min="10" data-max="60"><label for="pre_z">Raise Z to</label><input id="pre_z" type="number" value="20" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="@bed_x"><label for="pre_x">Purge X</label><input id="pre_x" type="number" value="10" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="@bed_y"><label for="pre_y">Purge Y</label><input id="pre_y" type="number" value="10" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="20"><label for="pre_len">Pre-extrude</label><input id="pre_len" type="number" value="1" step="0.1"><span class="unit">mm</span></div>
+      <div class="field" data-min="5" data-max="600"><label for="pre_speed">Pre-extrude speed</label><input id="pre_speed" type="number" value="20" step="5"><span class="unit">mm/min</span></div>
+    </div>
+
+    <div class="param-group">
       <div class="param-group-label">Print</div>
       <div class="field" data-min="0" data-max="3"><label for="print_height">Print height</label><input id="print_height" type="number" value="0.2" step="0.05"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="30"><label for="z_hop">Z hop</label><input id="z_hop" type="number" value="2.0" step="0.5"><span class="unit">mm</span></div>
@@ -276,6 +289,10 @@
         Always check your G-code with a simulator: <a href="https://ncviewer.com/" target="_blank" rel="noopener noreferrer">https://ncviewer.com/</a><br>
         Provided as is, without warranty. You use it at your own risk; the authors are not liable for any damage or injury.
       </div>
+      <button class="btn" id="btn-export" title="Save the current parameters as a .json file">Export settings</button>
+      <button class="btn" id="btn-load" title="Load parameters from a .json file">Load settings</button>
+      <input type="file" id="settings-file" accept=".json,application/json" hidden>
+      <button class="btn" id="btn-reset" title="Restore default parameters">Reset</button>
     </div>
     <div class="output-meta" id="meta">Load an image to generate G-code</div>
 
@@ -723,7 +740,7 @@
 
     const C = {
       bg: css('--bg'), surface2: css('--surface2'), border: css('--border'), border2: css('--border2'),
-      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'),
+      text3: css('--text3'), accent: css('--accent'), green: css('--green'), orange: css('--orange'), danger: css('--danger'),
     };
     const mapX = x => ml + (x - vx0) * scale;
     const mapY = y => mt + plotH - (y - vy0) * scale;
@@ -763,6 +780,17 @@
     ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
     ctx.strokeStyle = C.border2;
     ctx.strokeRect(bx0 + 0.5, by0 + 0.5, bx1 - bx0 - 1, by1 - by0 - 1);
+    ctx.restore();
+
+    // pre-extrude spot
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    if (last.preOn) {
+    ctx.strokeStyle = ctx.fillStyle = C.danger;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(mapX(last.preX), mapY(last.preY), 6, 0, Math.PI * 2); ctx.stroke();
+    ctx.globalAlpha = 0.35; ctx.fill();
+    }
     ctx.restore();
 
     // image bounding box
@@ -877,6 +905,7 @@
     const error = validate();
     if (error) { showError(error); return; }
     const seq = ++genSeq;
+    saveParams();                        // covers slider drags, which fire no input event
 
     const nx      = intVal('points_x');
     const ny      = intVal('points_y');
@@ -899,12 +928,18 @@
     const ePerMm = isPath ? val('e_per_mm') : 0;
     const lineSpeed = isPath ? intVal('print_speed') : 0;
 
+    const preOn = document.getElementById('pre_on').checked;
+    const preZ = val('pre_z'), preX = val('pre_x'), preY = val('pre_y');
+    const preLen = val('pre_len'), preSpeed = intVal('pre_speed');
+
     const bedX = val('bed_x'), bedY = val('bed_y');
     const outside = ox < 0 || oy < 0 || ox + w > bedX || oy + h > bedY;
+    const preOutside = preOn && (preX < 0 || preY < 0 || preX > bedX || preY > bedY);
+    const preWarn = preOutside ? [['⚠ pre-extrude spot is outside the work area', 'warn']] : [];
 
     if (!loadedImageSrc) {                               // nothing to print yet: just show the work area
-      last = { pixels: null, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY };
-      setMeta([['Load an image to generate G-code'], ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : [])]);
+      last = { pixels: null, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY, preX, preY, preOn };
+      setMeta([['Load an image to generate G-code'], ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : []), ...preWarn]);
       draw();
       return;
     }
@@ -938,6 +973,12 @@
       'G21 ; use mm',
       'G28 ; home all axes',
       'T0 ; select tool 0',
+      ...(preOn ? [
+        '; Pre-extrude',
+        `G1 Z${preZ.toFixed(2)} F1000`,
+        `G1 X${preX.toFixed(3)} Y${preY.toFixed(3)} F3000`,
+        ...(preLen > 0 ? [`G1 E${preLen.toFixed(5)} F${preSpeed} ; pre-extrude ${preLen} mm`, 'G92 E0 ; reset E for the print'] : []),
+      ] : []),
       `G1 Z${zh.toFixed(2)} F1000`,
     ];
     const footer = [
@@ -955,9 +996,9 @@
 
     const activeCount = pixels.flat().filter(p => p > 0).length;
     setMeta([[metaText || `${activeCount} active pixels · ${nx}×${ny} grid · ${bodyLines.length} G-code lines`],
-             ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : [])]);
+             ...(outside ? [['⚠ image extends beyond the work area', 'warn']] : []), ...preWarn]);
 
-    last = { pixels, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY, strokes };
+    last = { pixels, mode, nx, ny, ox, oy, w, h, turns, steps, bedX, bedY, strokes, preX, preY, preOn };
     draw();
   }
 
@@ -1056,7 +1097,15 @@
     clearTimeout(typeTimer);
     typeTimer = setTimeout(generate, 150);
   });
-  paramsEl.addEventListener('change', e => { if (e.target.matches('select')) generate(); });
+  const PRE_IDS = ['pre_z', 'pre_x', 'pre_y', 'pre_len', 'pre_speed'];
+  function applyPre() {                      // pre-extrude fields only show while the checkbox is on
+    const on = document.getElementById('pre_on').checked;
+    PRE_IDS.forEach(id => { document.getElementById(id).parentElement.style.display = on ? '' : 'none'; });
+  }
+  paramsEl.addEventListener('change', e => {
+    if (e.target.id === 'pre_on') applyPre();
+    if (e.target.matches('select') || e.target.id === 'pre_on') generate();
+  });
   function updateFields() { updateFills(); }
 
   // Validates the visible fields; returns an error message or null.
@@ -1105,6 +1154,11 @@
     angle_step:   ['must be a number', () => true],
     spiral_turns: ['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
     spiral_steps: ['must be an integer ≥ 10', v => Number.isInteger(v) && v >= 10],
+    pre_z:        ['must be ≥ 10', v => v >= 10],
+    pre_x:        ['must be a number', () => true],
+    pre_y:        ['must be a number', () => true],
+    pre_len:      ['must be ≥ 0', v => v >= 0],
+    pre_speed:    ['must be > 0', v => v > 0],
   };
 
   // ── WIRING ───────────────────────────────────────────────────────────────────
@@ -1125,7 +1179,72 @@
   };
   window.addEventListener('resize', onResize);
 
+  // ── SAVED SETTINGS ───────────────────────────────────────────────────────────
+  // Every parameter is remembered in localStorage (the image itself is not).
+  const STORE_KEY = 'bioprinter.imgtogcode.v1';
+  const paramEls  = () => [...paramsEl.querySelectorAll('input[id], select[id]')].filter(el => el.type !== 'file');
+  const defaults  = {};
+  paramEls().forEach(el => { defaults[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+
+  function saveParams() {
+    try {
+      const o = {};
+      paramEls().forEach(el => { o[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+      localStorage.setItem(STORE_KEY, JSON.stringify(o));
+    } catch {}
+  }
+  function applyParams(o) {
+    paramEls().forEach(el => {
+      if (!(el.id in o)) return;
+      if (el.type === 'checkbox') el.checked = !!o[el.id]; else el.value = o[el.id];
+    });
+  }
+  paramsEl.addEventListener('input',  saveParams);
+  paramsEl.addEventListener('change', saveParams);
+  try { applyParams(JSON.parse(localStorage.getItem(STORE_KEY)) || {}); } catch {}
+
+  document.getElementById('btn-reset').addEventListener('click', () => {
+    try { localStorage.removeItem(STORE_KEY); } catch {}
+    applyParams(defaults);
+    onModeChange(); applyPre(); updateFills(); generate();
+  });
+
+  // Settings as a .json file: same shape as what is kept in localStorage.
+  document.getElementById('btn-export').addEventListener('click', () => {
+    const o = { tool: 'img-to-gcode' };
+    paramEls().forEach(el => { o[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 2)], { type: 'application/json' }));
+    a.download = 'img-to-gcode-settings.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+  const settingsFile = document.getElementById('settings-file');
+  document.getElementById('btn-load').addEventListener('click', () => settingsFile.click());
+  settingsFile.addEventListener('change', async e => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const o = JSON.parse(await file.text());
+      if (!o || typeof o !== 'object' || (o.tool && o.tool !== 'img-to-gcode')) throw new Error('not an Image → G-code settings file');
+      const clean = {};
+      paramEls().forEach(el => {
+        if (!(el.id in o)) return;
+        if (el.type === 'checkbox') clean[el.id] = !!o[el.id];
+        else if (el.tagName === 'SELECT') { if ([...el.options].some(op => op.value === o[el.id])) clean[el.id] = o[el.id]; }
+        else if (Number.isFinite(parseFloat(o[el.id]))) clean[el.id] = o[el.id];
+      });
+      applyParams(clean);
+      saveParams();
+      onModeChange(); applyPre(); updateFills(); generate();
+    } catch (err) {
+      showError('Could not load settings: ' + err.message);
+    }
+  });
+
   onModeChange();
+  applyPre();
   updateFills();
   generate();                                          // draws the empty work area
 })();
