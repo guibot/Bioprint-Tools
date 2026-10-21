@@ -14,6 +14,7 @@
     border-bottom: 1px solid var(--border);
   }
 
+  .check.off { display: none; }
   .check { display: flex; align-items: center; gap: 8px; height: 28px; font-size: 13px; color: var(--text2); cursor: pointer; user-select: none; }
   .check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
 
@@ -252,7 +253,9 @@
         ok: v => v >= 10, hint: 'must be ≥ 10' },
       { id: 'pre_x',     label: 'Purge X',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_x'), step: 1, ...any },
       { id: 'pre_y',     label: 'Purge Y',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_y'), step: 1, ...any },
+      { id: 'pre_len',   label: 'Pre-extrude',       unit: 'mm',     value: 1,   min: 0, max: 20,  step: 0.1 },
       { id: 'pre_flow',  label: 'Pre-extrude flow',  unit: '%',      value: 100, min: 0, max: 500, step: 5 },
+      { id: 'pre_pause', label: 'Pre-extrude pause', unit: 'ms',     value: 1000, min: 0, max: 10000, step: 100 },
       { id: 'pre_lift_z',     label: 'Lift Z after',   unit: 'mm',     value: 30,  min: 0,  max: 100, step: 1,
         ok: v => v >= val('pre_z'), hint: 'must be ≥ Raise Z to' },
       { id: 'pre_lift_speed', label: 'Lift speed',     unit: 'mm/min', value: 400, min: 60, max: 3000, step: 20, ...pos },
@@ -261,7 +264,7 @@
       // dots
       { modes: ['dots'], id: 'print_height',  label: 'Print height',          unit: 'mm',     value: 0.2,   min: 0,  max: 3,     step: 0.05 },
       { modes: ['dots'], id: 'z_hop',         label: 'Z hop',                 unit: 'mm',     value: 5.0,   min: 0,  max: 30,    step: 0.5 },
-      { id: 'flow_rate',     label: 'Extrusion per dot (E)', labels: { lines: 'Dot E (pre-extrude base)' }, unit: '',       value: 0.022, min: 0,  max: 0.2,   step: 0.001 },
+      { modes: ['dots'], id: 'flow_rate',     label: 'Extrusion per dot (E)', unit: '',       value: 0.022, min: 0,  max: 0.2,   step: 0.001 },
       { modes: ['dots'], id: 'travel_speed',  label: 'Travel speed',          unit: 'mm/min', value: 600,   min: 60, max: 6000,  step: 10, ...pos },
       { modes: ['dots'], id: 'extrude_speed', label: 'Extrude speed',         unit: 'mm/min', value: 20,    min: 5,  max: 200,   step: 5,  ...pos },
       { modes: ['dots'], id: 'pause_time_ms', label: 'Pause',                 unit: 'ms',     value: 3000,  min: 0,  max: 10000, step: 100 },
@@ -304,10 +307,12 @@
       const o = { mode };
       FIELDS.forEach(f => { o[f.id] = val(f.id); });
       o.pre_on = preOn();
+      o.optimize = optOn();
       localStorage.setItem(STORE_KEY, JSON.stringify(o));
     } catch {}
   }
   const preOn  = () => !!$('pre_on') && $('pre_on').checked;
+  const optOn  = () => !!$('optimize') && $('optimize').checked;
   const isPre  = f => f.id.startsWith('pre_');
   function applyPre() {                      // pre-extrude fields only show while the checkbox is on
     FIELDS.filter(isPre).forEach(f => $(f.id).parentElement.classList.toggle('off', !preOn()));
@@ -328,6 +333,13 @@
       title.className = 'param-group-label';
       title.textContent = g.label;
       group.appendChild(title);
+      if (g.label === 'Print') {
+        const c = document.createElement('label');
+        c.className = 'check';
+        c.id = 'optimize-row';
+        c.innerHTML = `<input id="optimize" type="checkbox"${saved.optimize === false ? '' : ' checked'}> Optimize path (fewer lifts)`;
+        group.appendChild(c);
+      }
       if (g.label === 'Pre-extrude') {
         const c = document.createElement('label');
         c.className = 'check';
@@ -360,6 +372,7 @@
       $(f.id).min = fieldMin(f);
     });
     applyPre();
+    $('optimize-row').classList.toggle('off', mode !== 'lines');
     $('legend').innerHTML = mode === 'dots'
       ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span><span><i class="purge"></i>pre-extrude</span>'
       : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="purge"></i>pre-extrude</span>';
@@ -422,7 +435,7 @@
     if (rafId) return;
     rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
   }
-  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') { applyPre(); generate(); } });
+  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') applyPre(); if (e.target.id === 'pre_on' || e.target.id === 'optimize') generate(); });
   paramsEl.addEventListener('input', () => {   // while typing: short debounce
     updateFields();
     clearTimeout(typeTimer);
@@ -598,16 +611,17 @@
   }
 
   // ── G-code ────────────────────────────────────────────────────
-  // Raise Z, go to the purge spot, extrude like one dot (flow_rate) scaled by pre_flow %. Returns the E total afterwards.
+  // Raise Z, go to the purge spot, extrude pre_len mm scaled by pre_flow %, then wait pre_pause ms. Returns the E total afterwards.
   // Afterwards lifts Z slowly and travels to the grid origin (startX, startY).
   function preExtrude(lines, travelSpeed, startX, startY) {
     if (!preOn()) return 0;
-    const z = val('pre_z'), x = val('pre_x'), y = val('pre_y'), len = val('flow_rate') * val('pre_flow') / 100;
+    const z = val('pre_z'), x = val('pre_x'), y = val('pre_y'), len = val('pre_len') * val('pre_flow') / 100;
     const sp = mode === 'dots' ? intVal('extrude_speed') : 20;   // lines mode has no extrude speed
     lines.push('; Pre-extrude');
     lines.push(`G1 Z${z.toFixed(2)} F${travelSpeed}`);
     lines.push(`G1 X${x.toFixed(3)} Y${y.toFixed(3)} F${travelSpeed}`);
-    if (len > 0) lines.push(`G1 E${len.toFixed(5)} F${sp} ; pre-extrude ${val('pre_flow')}% of a dot`);
+    if (len > 0) lines.push(`G1 E${len.toFixed(5)} F${sp} ; pre-extrude ${val('pre_len')} mm at ${val('pre_flow')}%`);
+    if (len > 0 && val('pre_pause') > 0) lines.push(`G4 P${intVal('pre_pause')} ; wait ${intVal('pre_pause')}ms`);
     lines.push(`G1 Z${val('pre_lift_z').toFixed(2)} F${intVal('pre_lift_speed')} ; lift Z`);
     lines.push(`G1 X${startX.toFixed(3)} Y${startY.toFixed(3)} F${travelSpeed} ; travel to origin`);
     return len;
@@ -670,6 +684,57 @@
     };
   }
 
+  // Splits the grid into unit edges between crossings and walks them in as few strokes
+  // (= pen lifts) as possible: greedy trails, starting at odd-degree crossings and
+  // going straight on whenever possible. Returns trails as lists of [x, y] corners.
+  function gridTrails(x0, y0, width, height, nH, nV, spH, spV, penX, penY) {
+    const uniq = arr => [...new Map(arr.map(v => [Math.round(v * 1e6), v])).values()].sort((a, b) => a - b);
+    const xs = uniq([x0, x0 + width,  ...Array.from({ length: nV }, (_, i) => x0 + i * spV)]);
+    const ys = uniq([y0, y0 + height, ...Array.from({ length: nH }, (_, j) => y0 + j * spH)]);
+    const NX = xs.length, id = (ix, iy) => iy * NX + ix;
+    const idx = (arr, v) => arr.findIndex(a => Math.abs(a - v) < 1e-6);
+
+    const edges = [];                                   // [nodeA, nodeB]
+    const adj = Array.from({ length: NX * ys.length }, () => []);
+    const addEdge = (a, b) => { adj[a].push(edges.length); adj[b].push(edges.length); edges.push([a, b]); };
+    for (let j = 0; j < nH; j++) { const iy = idx(ys, y0 + j * spH); for (let ix = 0; ix < NX - 1; ix++) addEdge(id(ix, iy), id(ix + 1, iy)); }
+    for (let i = 0; i < nV; i++) { const ix = idx(xs, x0 + i * spV); for (let iy = 0; iy < ys.length - 1; iy++) addEdge(id(ix, iy), id(ix, iy + 1)); }
+
+    const used = new Array(edges.length).fill(false);
+    const left = n => adj[n].filter(e => !used[e]);
+    const pos  = n => [xs[n % NX], ys[Math.floor(n / NX)]];
+    const trails = [];
+    let remaining = edges.length, px = penX, py = penY;
+
+    while (remaining > 0) {
+      let best = -1, bestKey = null;                    // odd crossings first, then nearest to the pen
+      for (let n = 0; n < adj.length; n++) {
+        const d = left(n).length;
+        if (!d) continue;
+        const [x, y] = pos(n);
+        const key = [d % 2 ? 0 : 1, Math.hypot(x - px, y - py)];
+        if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1] - 1e-9)) { best = n; bestKey = key; }
+      }
+      let cur = best, dir = null;
+      const trail = [pos(cur)];
+      for (;;) {
+        const opts = left(cur);
+        if (!opts.length) break;
+        const dirOf = e => { const o = edges[e][0] === cur ? edges[e][1] : edges[e][0]; return [Math.sign(pos(o)[0] - pos(cur)[0]), Math.sign(pos(o)[1] - pos(cur)[1])]; };
+        const e = opts.find(o => dir && dirOf(o)[0] === dir[0] && dirOf(o)[1] === dir[1]) ?? opts[0];
+        dir = dirOf(e);
+        used[e] = true; remaining--;
+        cur = edges[e][0] === cur ? edges[e][1] : edges[e][0];
+        const p = pos(cur), q = trail[trail.length - 1], r = trail[trail.length - 2];
+        if (r && Math.sign(q[0] - r[0]) === dir[0] && Math.sign(q[1] - r[1]) === dir[1]) trail[trail.length - 1] = p;   // straight on: extend the last move
+        else trail.push(p);
+      }
+      trails.push(trail);
+      [px, py] = trail[trail.length - 1];
+    }
+    return trails;
+  }
+
   // Grid lines through the same points: points_y horizontal lines spanning the width,
   // points_x vertical lines spanning the height. Ported from grid-generator.html.
   function buildLines() {
@@ -730,6 +795,9 @@
     lines.push(`M107`);
     lines.push(``);
 
+    const optimize = optOn();
+    let nStrokes = 0, penX = startX, penY = startY;
+
     for (let layer = 0; layer < nLayers; layer++) {
       const printZ = layerH * (layer + 1);
       const liftZ  = printZ + travelZ;
@@ -737,6 +805,26 @@
       lines.push(`;--- LAYER ${layer + 1} / ${nLayers}  (Z=${printZ.toFixed(3)} mm) ---`);
       lines.push(`;LAYER:${layer}`);
       lines.push(``);
+
+      if (optimize) {
+        const trails = gridTrails(startX, startY, width, height, nH, nV, spH, spV, penX, penY);
+        trails.forEach((trail, k) => {
+          lines.push(`;  Path ${k + 1} / ${trails.length}`);
+          lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+          lines.push(`G0 F${spTravel} X${fmtXY(trail[0][0])} Y${fmtXY(trail[0][1])}`);
+          lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+          for (let p = 1; p < trail.length; p++) {
+            E += calcExtrusion(Math.hypot(trail[p][0] - trail[p - 1][0], trail[p][1] - trail[p - 1][1]), layerH, lw, flow);
+            lines.push(`G1 F${spPrint} X${fmtXY(trail[p][0])} Y${fmtXY(trail[p][1])} E${fmt(E)}`);
+          }
+        });
+        nStrokes += trails.length;
+        [penX, penY] = trails[trails.length - 1][trails[trails.length - 1].length - 1];
+        lines.push(``);
+        continue;
+      }
+
+      nStrokes += nH + nV;
       lines.push(`;  Horizontal lines`);
 
       for (let i = 0; i < nH; i++) {
@@ -775,7 +863,7 @@
 
     return {
       lines,
-      info: [`${(nH + nV) * nLayers} strokes · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
+      info: [`${nStrokes} strokes${optimize ? ` (was ${(nH + nV) * nLayers})` : ''} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
              `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · E total ${E.toFixed(3)}`],
       geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw },
       filename: `grid_${nH}h_${nV}v.gcode`,
@@ -875,7 +963,7 @@
 
   // Settings as a .json file: same shape as what is kept in localStorage.
   $('btn-export').addEventListener('click', () => {
-    const o = { tool: 'dot-grid', mode, pre_on: preOn() };
+    const o = { tool: 'dot-grid', mode, pre_on: preOn(), optimize: optOn() };
     FIELDS.forEach(f => { o[f.id] = val(f.id); });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 2)], { type: 'application/json' }));
@@ -891,7 +979,7 @@
     try {
       const o = JSON.parse(await file.text());
       if (!o || typeof o !== 'object' || (o.tool && o.tool !== 'dot-grid')) throw new Error('not a Dot / Line Grid settings file');
-      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false };
+      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false, optimize: o.optimize !== false };
       FIELDS.forEach(f => { if (Number.isFinite(o[f.id])) clean[f.id] = o[f.id]; });
       localStorage.setItem(STORE_KEY, JSON.stringify(clean));
       buildParams();
