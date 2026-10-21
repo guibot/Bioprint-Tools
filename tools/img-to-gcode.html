@@ -942,7 +942,7 @@
     ];
     const footer = [
       '; End of print',
-      `G1 Z${(zh + 5).toFixed(2)} F1000`,
+      'G1 Z30 F1000 ; move Z to 30',
       'M104 S0',
       'M140 S0',
       'M84',

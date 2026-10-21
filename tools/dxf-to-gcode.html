@@ -509,9 +509,8 @@ function buildGcode(points, params) {
   lines.push('M104 S0 ; Hotend off');
   lines.push('M140 S0 ; Bed off');
   lines.push('');
-  lines.push('G91 ; Relative mode');
-  lines.push('G1 Z5 F300 ; Lower bed 5mm');
-  lines.push('G90 ; Back to absolute');
+  lines.push('G90 ; Absolute mode');
+  lines.push('G1 Z30 F300 ; Move Z to 30');
   lines.push('');
   lines.push('M82 ;Absolute extrusion mode');
   lines.push('M104 S0');

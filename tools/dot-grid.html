@@ -595,7 +595,7 @@
       }
     }
     lines.push('; End of print');
-    lines.push(`G1 Z${(z_hop + 5).toFixed(2)} F${travel_speed}`);
+    lines.push(`G1 Z30 F${travel_speed} ; move Z to 30`);
     lines.push('M104 S0 ; turn off hotend');
     lines.push('M140 S0 ; turn off bed');
     lines.push('M84 ; disable motors');
@@ -705,9 +705,8 @@
       lines.push(``);
     }
 
-    const finalZ = layerH * nLayers + travelZ;
     lines.push(`;--- END ---`);
-    lines.push(`G0 F3000 Z${fmtZ(finalZ)}`);
+    lines.push(`G0 F3000 Z30 ; move Z to 30`);
     lines.push(`M82`);
     lines.push(`M104 S0`);
     lines.push(`;End of Gcode`);
