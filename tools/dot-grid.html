@@ -133,6 +133,7 @@
   .legend span { display: inline-flex; align-items: center; gap: 6px; }
   .legend i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
   .legend i.start  { background: var(--orange); }
+  .legend i.outline { width: 14px; height: 3px; border-radius: 2px; background: var(--orange); }
   .legend i.purge  { background: var(--danger); }
   .legend i.dot    { background: var(--green); }
   .legend i.hline  { width: 14px; height: 3px; border-radius: 2px; background: var(--green); }
@@ -247,6 +248,7 @@
         ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_x), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_x)}` },
       { id: 'points_y', label: 'Points Y', labels: { lines: 'Horizontal lines' }, unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
         ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_y)}` },
+      { modes: ['lines'], id: 'angle', label: 'Rotate lines', unit: '°', value: 0, min: -90, max: 90, step: 1, ...any },
     ]},
     { label: 'Pre-extrude', fields: [
       { id: 'pre_z',     label: 'Raise Z to',        unit: 'mm',     value: 20, min: 10, max: 60, step: 1,
@@ -278,6 +280,10 @@
       { modes: ['lines'], id: 'temp',         label: 'Temperature',           unit: '°C',     value: 280,   min: 0,  max: 400,   step: 1 },
       { modes: ['lines'], id: 'travel_z',     label: 'Travel Z',              unit: 'mm',     value: 2,     min: 0,  max: 20,    step: 0.1 },
     ]},
+    { label: 'Retract', fields: [
+      { id: 'retract',       label: 'Retract',       unit: 'mm',     value: 0,  min: 0,  max: 1,   step: 0.01 },
+      { id: 'retract_speed', label: 'Retract speed', unit: 'mm/min', value: 60, min: 5,  max: 600, step: 5, ...pos },
+    ]},
     { label: 'End', fields: [
       { id: 'final_z',     label: 'Final Z',     unit: 'mm',     value: 30,   min: 0,  max: 100,  step: 1 },
       { id: 'final_speed', label: 'Final speed', unit: 'mm/min', value: 1000, min: 60, max: 6000, step: 60, ...pos },
@@ -308,11 +314,13 @@
       FIELDS.forEach(f => { o[f.id] = val(f.id); });
       o.pre_on = preOn();
       o.optimize = optOn();
+      o.outline = outOn();
       localStorage.setItem(STORE_KEY, JSON.stringify(o));
     } catch {}
   }
   const preOn  = () => !!$('pre_on') && $('pre_on').checked;
   const optOn  = () => !!$('optimize') && $('optimize').checked;
+  const outOn  = () => !!$('outline') && $('outline').checked;
   const isPre  = f => f.id.startsWith('pre_');
   function applyPre() {                      // pre-extrude fields only show while the checkbox is on
     FIELDS.filter(isPre).forEach(f => $(f.id).parentElement.classList.toggle('off', !preOn()));
@@ -339,6 +347,11 @@
         c.id = 'optimize-row';
         c.innerHTML = `<input id="optimize" type="checkbox"${saved.optimize === false ? '' : ' checked'}> Optimize path (fewer lifts)`;
         group.appendChild(c);
+        const o = document.createElement('label');
+        o.className = 'check';
+        o.id = 'outline-row';
+        o.innerHTML = `<input id="outline" type="checkbox"${saved.outline === false ? '' : ' checked'}> Print the rectangle outline last`;
+        group.appendChild(o);
       }
       if (g.label === 'Pre-extrude') {
         const c = document.createElement('label');
@@ -373,9 +386,10 @@
     });
     applyPre();
     $('optimize-row').classList.toggle('off', mode !== 'lines');
+    $('outline-row').classList.toggle('off', mode !== 'lines');
     $('legend').innerHTML = mode === 'dots'
       ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span><span><i class="purge"></i>pre-extrude</span>'
-      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="purge"></i>pre-extrude</span>';
+      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="outline"></i>outline</span><span><i class="purge"></i>pre-extrude</span>';
     updateFields();
   }
 
@@ -435,7 +449,7 @@
     if (rafId) return;
     rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
   }
-  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') applyPre(); if (e.target.id === 'pre_on' || e.target.id === 'optimize') generate(); });
+  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') applyPre(); if (['pre_on', 'optimize', 'outline'].includes(e.target.id)) generate(); });
   paramsEl.addEventListener('input', () => {   // while typing: short debounce
     updateFields();
     clearTimeout(typeTimer);
@@ -575,16 +589,19 @@
 
     if (kind === 'lines') {
       // horizontal lines (green), then vertical (blue) — same order as the G-code
+      const segs = gridSegments(ox, oy, width, height, py, px, last.angle);
       ctx.lineWidth = clamp(lw * scale, 1.5, 5);
       ctx.lineCap = 'round';
-      ctx.strokeStyle = C.green;
-      ctx.beginPath();
-      for (let j = 0; j < py; j++) { const Y = mapY(oy + j * dy); ctx.moveTo(mapX(gx0), Y); ctx.lineTo(mapX(gx1), Y); }
-      ctx.stroke();
-      ctx.strokeStyle = C.accent;
-      ctx.beginPath();
-      for (let i = 0; i < px; i++) { const X = mapX(ox + i * dx); ctx.moveTo(X, mapY(gy0)); ctx.lineTo(X, mapY(gy1)); }
-      ctx.stroke();
+      [[segs.h, C.green], [segs.v, C.accent]].forEach(([list, colour]) => {
+        ctx.strokeStyle = colour;
+        ctx.beginPath();
+        list.forEach(g => { ctx.moveTo(mapX(g.x1), mapY(g.y1)); ctx.lineTo(mapX(g.x2), mapY(g.y2)); });
+        ctx.stroke();
+      });
+      if (last.outline) {                               // printed last: the rectangle itself
+        ctx.strokeStyle = C.orange; ctx.lineWidth = clamp(lw * scale, 1.5, 5);
+        ctx.strokeRect(mapX(gx0), mapY(gy1), (gx1 - gx0) * scale, (gy1 - gy0) * scale);
+      }
       ctx.fillStyle = C.orange;
       ctx.beginPath(); ctx.arc(mapX(ox), mapY(oy), 4.5, 0, Math.PI * 2); ctx.fill();
       return;
@@ -611,6 +628,37 @@
   }
 
   // ── G-code ────────────────────────────────────────────────────
+  // Retract: pull the plunger back by `ret` mm before every Z lift that follows extrusion
+  // (which includes the lift after the pre-extrude and the final lift at the end), and push it
+  // back just before extrusion resumes. Works on the finished G-code, tracking the absolute E.
+  function applyRetract(lines, ret, speed) {
+    if (!(ret > 0)) return lines;
+    const out = [];
+    let E = 0, z = null, retracted = false, extruded = false;
+    for (const raw of lines) {
+      const code = raw.split(';')[0];
+      const em = /(?:^|\s)E(-?\d*\.?\d+)/.exec(code);
+      if (/^\s*G92\b/.test(code)) { if (em) E = parseFloat(em[1]); out.push(raw); continue; }
+      const move = /^\s*G[01]\b/.test(code);
+      if (move && em) {
+        if (retracted) { out.push(`G1 E${(E + ret).toFixed(5)} F${speed} ; unretract`); retracted = false; }
+        E = parseFloat(em[1]); extruded = true;
+        out.push(raw); continue;
+      }
+      const zm = move && /\bZ(-?\d*\.?\d+)/.exec(code);
+      if (zm) {
+        const nz = parseFloat(zm[1]);
+        if (z !== null && nz > z && extruded && !retracted) {
+          E -= ret; retracted = true;
+          out.push(`G1 E${E.toFixed(5)} F${speed} ; retract ${ret} mm`);
+        }
+        z = nz;
+      }
+      out.push(raw);
+    }
+    return out;
+  }
+
   // Raise Z, go to the purge spot, extrude pre_len mm scaled by pre_flow %, then wait pre_pause ms. Returns the E total afterwards.
   // Afterwards lifts Z slowly and travels to the grid origin (startX, startY).
   function preExtrude(lines, travelSpeed, startX, startY) {
@@ -684,50 +732,124 @@
     };
   }
 
-  // Splits the grid into unit edges between crossings and walks them in as few strokes
-  // (= pen lifts) as possible: greedy trails, starting at odd-degree crossings and
-  // going straight on whenever possible. Returns trails as lists of [x, y] corners.
-  function gridTrails(x0, y0, width, height, nH, nV, spH, spV, penX, penY) {
-    const uniq = arr => [...new Map(arr.map(v => [Math.round(v * 1e6), v])).values()].sort((a, b) => a - b);
-    const xs = uniq([x0, x0 + width,  ...Array.from({ length: nV }, (_, i) => x0 + i * spV)]);
-    const ys = uniq([y0, y0 + height, ...Array.from({ length: nH }, (_, j) => y0 + j * spH)]);
-    const NX = xs.length, id = (ix, iy) => iy * NX + ix;
-    const idx = (arr, v) => arr.findIndex(a => Math.abs(a - v) < 1e-6);
+  // The line grid of the rectangle (x0,y0,width,height), rotated by `angle` degrees around the
+  // rectangle's centre and clipped to the rectangle. Line spacing and anchor are those of the
+  // unrotated grid, and enough lines are added to cover the whole rectangle at any angle.
+  // Returns { h, v }: lists of segments { x1, y1, x2, y2, t0, t1, c } where c is the line's
+  // position in the rotated frame and t0..t1 its extent along the line in that frame.
+  function gridSegments(x0, y0, width, height, nH, nV, angle) {
+    const cx = x0 + width / 2, cy = y0 + height / 2;
+    const th = angle * Math.PI / 180, co = Math.cos(th), si = Math.sin(th);
+    const reach = Math.hypot(width, height) / 2 + 1e-6;
+    const spH = nH > 1 ? height / (nH - 1) : 0, spV = nV > 1 ? width / (nV - 1) : 0;
+    const offsets = (first, sp) => {                    // positions first + k·sp that can touch the rectangle
+      if (!(sp > 0)) return [first];
+      const out = [];
+      for (let k = Math.ceil((-reach - first) / sp); first + k * sp <= reach; k++) out.push(first + k * sp);
+      return out;
+    };
+    const eps = 1e-6;
+    const clip = (u, v, du, dv) => {                    // point (u,v) + t·(du,dv) in the rotated frame
+      const X0 = u * co - v * si, Y0 = u * si + v * co, dx = du * co - dv * si, dy = du * si + dv * co;
+      let t0 = -Infinity, t1 = Infinity;
+      for (const [p, d, half] of [[X0, dx, width / 2], [Y0, dy, height / 2]]) {
+        if (Math.abs(d) < 1e-12) { if (Math.abs(p) > half + eps) return null; continue; }
+        const a = (-half - p) / d, b = (half - p) / d;
+        t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b));
+      }
+      if (t1 - t0 < 1e-6) return null;
+      return { x1: cx + X0 + t0 * dx, y1: cy + Y0 + t0 * dy, x2: cx + X0 + t1 * dx, y2: cy + Y0 + t1 * dy, t0, t1 };
+    };
+    const h = [], v = [];
+    offsets(-height / 2, spH).forEach(c => { const g = clip(0, c, 1, 0); if (g) h.push({ ...g, c }); });
+    offsets(-width / 2,  spV).forEach(c => { const g = clip(c, 0, 0, 1); if (g) v.push({ ...g, c }); });
+    return { h, v };
+  }
 
-    const edges = [];                                   // [nodeA, nodeB]
-    const adj = Array.from({ length: NX * ys.length }, () => []);
-    const addEdge = (a, b) => { adj[a].push(edges.length); adj[b].push(edges.length); edges.push([a, b]); };
-    for (let j = 0; j < nH; j++) { const iy = idx(ys, y0 + j * spH); for (let ix = 0; ix < NX - 1; ix++) addEdge(id(ix, iy), id(ix + 1, iy)); }
-    for (let i = 0; i < nV; i++) { const ix = idx(xs, x0 + i * spV); for (let iy = 0; iy < ys.length - 1; iy++) addEdge(id(ix, iy), id(ix, iy + 1)); }
+  // The rectangle's own outline (width × height), as trails. Edges already covered by a grid
+  // line (angle 0° / 90°) are skipped so nothing is printed twice. Starts at the corner nearest the pen.
+  function outlineTrails(segs, x0, y0, width, height, penX, penY) {
+    const corners = [[x0, y0], [x0 + width, y0], [x0 + width, y0 + height], [x0, y0 + height]];
+    const on = (p, g) => {                              // is p on segment g?
+      const dx = g.x2 - g.x1, dy = g.y2 - g.y1, l = Math.hypot(dx, dy);
+      const t = ((p[0] - g.x1) * dx + (p[1] - g.y1) * dy) / (l * l);
+      const px = g.x1 + t * dx, py = g.y1 + t * dy;
+      return t > -1e-6 && t < 1 + 1e-6 && Math.hypot(p[0] - px, p[1] - py) < 1e-4;
+    };
+    const all = [...segs.h, ...segs.v];
+    const covered = corners.map((a, i) => { const b = corners[(i + 1) % 4]; return all.some(g => on(a, g) && on(b, g)); });
+    if (!covered.some(Boolean)) {
+      let k = 0;
+      corners.forEach((c, i) => { if (Math.hypot(c[0] - penX, c[1] - penY) < Math.hypot(corners[k][0] - penX, corners[k][1] - penY)) k = i; });
+      return [[0, 1, 2, 3, 4].map(i => corners[(k + i) % 4])];
+    }
+    const trails = [];
+    const c0 = covered.indexOf(true);
+    let chain = null;
+    for (let n = 1; n <= 4; n++) {                      // walk the edges after a covered one, chaining the free ones
+      const i = (c0 + n) % 4;
+      if (covered[i]) { chain = null; continue; }
+      if (!chain) { chain = [corners[i]]; trails.push(chain); }
+      chain.push(corners[(i + 1) % 4]);
+    }
+    return trails;
+  }
+
+  // Walks the grid in as few strokes (= pen lifts) as possible: the lines are split at their
+  // crossings, then walked in greedy trails that start at odd-degree crossings and go straight
+  // on whenever possible. Returns trails as lists of [x, y] corners.
+  function gridTrails(segs, penX, penY) {
+    const nodes = new Map();                            // rounded coordinates -> node index
+    const pts = [], adj = [], edges = [];
+    const node = (x, y) => {
+      const k = Math.round(x * 1000) + ',' + Math.round(y * 1000);
+      if (!nodes.has(k)) { nodes.set(k, pts.length); pts.push([x, y]); adj.push([]); }
+      return nodes.get(k);
+    };
+    const world = (g, t) => { const f = (t - g.t0) / (g.t1 - g.t0); return [g.x1 + (g.x2 - g.x1) * f, g.y1 + (g.y2 - g.y1) * f]; };
+    const eps = 1e-6;
+    const split = (g, others) => {                      // crossings of g with the lines of the other family
+      const ts = [g.t0, g.t1];
+      others.forEach(o => { if (o.c > g.t0 - eps && o.c < g.t1 + eps && g.c > o.t0 - eps && g.c < o.t1 + eps) ts.push(o.c); });
+      ts.sort((a, b) => a - b);
+      for (let k = 0; k < ts.length - 1; k++) {
+        if (ts[k + 1] - ts[k] < 1e-6) continue;
+        const a = node(...world(g, ts[k])), b = node(...world(g, ts[k + 1]));
+        if (a === b) continue;
+        adj[a].push(edges.length); adj[b].push(edges.length); edges.push([a, b]);
+      }
+    };
+    segs.h.forEach(g => split(g, segs.v));
+    segs.v.forEach(g => split(g, segs.h));
 
     const used = new Array(edges.length).fill(false);
     const left = n => adj[n].filter(e => !used[e]);
-    const pos  = n => [xs[n % NX], ys[Math.floor(n / NX)]];
+    const other = (e, n) => edges[e][0] === n ? edges[e][1] : edges[e][0];
+    const unit = (a, b) => { const dx = pts[b][0] - pts[a][0], dy = pts[b][1] - pts[a][1], l = Math.hypot(dx, dy); return [dx / l, dy / l]; };
     const trails = [];
     let remaining = edges.length, px = penX, py = penY;
 
     while (remaining > 0) {
       let best = -1, bestKey = null;                    // odd crossings first, then nearest to the pen
-      for (let n = 0; n < adj.length; n++) {
+      for (let n = 0; n < pts.length; n++) {
         const d = left(n).length;
         if (!d) continue;
-        const [x, y] = pos(n);
-        const key = [d % 2 ? 0 : 1, Math.hypot(x - px, y - py)];
+        const key = [d % 2 ? 0 : 1, Math.hypot(pts[n][0] - px, pts[n][1] - py)];
         if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1] - 1e-9)) { best = n; bestKey = key; }
       }
       let cur = best, dir = null;
-      const trail = [pos(cur)];
+      const trail = [pts[cur]];
       for (;;) {
         const opts = left(cur);
         if (!opts.length) break;
-        const dirOf = e => { const o = edges[e][0] === cur ? edges[e][1] : edges[e][0]; return [Math.sign(pos(o)[0] - pos(cur)[0]), Math.sign(pos(o)[1] - pos(cur)[1])]; };
-        const e = opts.find(o => dir && dirOf(o)[0] === dir[0] && dirOf(o)[1] === dir[1]) ?? opts[0];
-        dir = dirOf(e);
+        const straight = o => { if (!dir) return false; const d = unit(cur, other(o, cur)); return d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6; };
+        const e = opts.find(straight) ?? opts[0];
+        const nxt = other(e, cur);
+        const d = unit(cur, nxt);
         used[e] = true; remaining--;
-        cur = edges[e][0] === cur ? edges[e][1] : edges[e][0];
-        const p = pos(cur), q = trail[trail.length - 1], r = trail[trail.length - 2];
-        if (r && Math.sign(q[0] - r[0]) === dir[0] && Math.sign(q[1] - r[1]) === dir[1]) trail[trail.length - 1] = p;   // straight on: extend the last move
-        else trail.push(p);
+        if (dir && d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6) trail[trail.length - 1] = pts[nxt];   // straight on: extend the last move
+        else trail.push(pts[nxt]);
+        dir = d; cur = nxt;
       }
       trails.push(trail);
       [px, py] = trail[trail.length - 1];
@@ -796,7 +918,22 @@
     lines.push(``);
 
     const optimize = optOn();
+    const segs = gridSegments(startX, startY, width, height, nH, nV, val('angle'));
     let nStrokes = 0, penX = startX, penY = startY;
+    const outline = outOn();
+    const outCount = outline ? outlineTrails(segs, startX, startY, width, height, startX, startY).length : 0;
+    const emitTrail = (trail, label, liftZ, printZ) => {
+      lines.push(`;  ${label}`);
+      lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+      lines.push(`G0 F${spTravel} X${fmtXY(trail[0][0])} Y${fmtXY(trail[0][1])}`);
+      lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+      for (let p = 1; p < trail.length; p++) {
+        E += calcExtrusion(Math.hypot(trail[p][0] - trail[p - 1][0], trail[p][1] - trail[p - 1][1]), layerH, lw, flow);
+        lines.push(`G1 F${spPrint} X${fmtXY(trail[p][0])} Y${fmtXY(trail[p][1])} E${fmt(E)}`);
+      }
+      nStrokes++;
+      [penX, penY] = trail[trail.length - 1];
+    };
 
     for (let layer = 0; layer < nLayers; layer++) {
       const printZ = layerH * (layer + 1);
@@ -807,52 +944,30 @@
       lines.push(``);
 
       if (optimize) {
-        const trails = gridTrails(startX, startY, width, height, nH, nV, spH, spV, penX, penY);
-        trails.forEach((trail, k) => {
-          lines.push(`;  Path ${k + 1} / ${trails.length}`);
-          lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
-          lines.push(`G0 F${spTravel} X${fmtXY(trail[0][0])} Y${fmtXY(trail[0][1])}`);
-          lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
-          for (let p = 1; p < trail.length; p++) {
-            E += calcExtrusion(Math.hypot(trail[p][0] - trail[p - 1][0], trail[p][1] - trail[p - 1][1]), layerH, lw, flow);
-            lines.push(`G1 F${spPrint} X${fmtXY(trail[p][0])} Y${fmtXY(trail[p][1])} E${fmt(E)}`);
-          }
-        });
-        nStrokes += trails.length;
-        [penX, penY] = trails[trails.length - 1][trails[trails.length - 1].length - 1];
+        const trails = gridTrails(segs, penX, penY);
+        trails.forEach((trail, k) => emitTrail(trail, `Path ${k + 1} / ${trails.length}`, liftZ, printZ));
         lines.push(``);
-        continue;
+      } else {
+      nStrokes += segs.h.length + segs.v.length;
+      [['Horizontal lines', segs.h], ['Vertical lines', segs.v]].forEach(([title, list]) => {
+        lines.push(`;  ${title}`);
+        list.forEach(g => {
+          lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+          lines.push(`G0 F${spTravel} X${fmtXY(g.x1)} Y${fmtXY(g.y1)}`);
+          lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+          E += calcExtrusion(Math.hypot(g.x2 - g.x1, g.y2 - g.y1), layerH, lw, flow);
+          lines.push(`G1 F${spPrint} X${fmtXY(g.x2)} Y${fmtXY(g.y2)} E${fmt(E)}`);
+        });
+        lines.push(``);
+      });
+      const lastSeg = segs.v[segs.v.length - 1] || segs.h[segs.h.length - 1];
+      if (lastSeg) [penX, penY] = [lastSeg.x2, lastSeg.y2];
       }
 
-      nStrokes += nH + nV;
-      lines.push(`;  Horizontal lines`);
-
-      for (let i = 0; i < nH; i++) {
-        const y  = startY + i * spH;
-        const x0 = startX;
-        const x1 = startX + lenH;
-        lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
-        lines.push(`G0 F${spTravel} X${fmtXY(x0)} Y${fmtXY(y)}`);
-        lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
-        E += calcExtrusion(lenH, layerH, lw, flow);
-        lines.push(`G1 F${spPrint} X${fmtXY(x1)} Y${fmtXY(y)} E${fmt(E)}`);
+      if (outline) {
+        outlineTrails(segs, startX, startY, width, height, penX, penY).forEach((trail, k, all) => emitTrail(trail, `Outline ${k + 1} / ${all.length}`, liftZ, printZ));
+        lines.push(``);
       }
-
-      lines.push(``);
-      lines.push(`;  Vertical lines`);
-
-      for (let j = 0; j < nV; j++) {
-        const x  = startX + j * spV;
-        const y0 = startY;
-        const y1 = startY + lenV;
-        lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
-        lines.push(`G0 F${spTravel} X${fmtXY(x)} Y${fmtXY(y0)}`);
-        lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
-        E += calcExtrusion(lenV, layerH, lw, flow);
-        lines.push(`G1 F${spPrint} X${fmtXY(x)} Y${fmtXY(y1)} E${fmt(E)}`);
-      }
-
-      lines.push(``);
     }
 
     lines.push(`;--- END ---`);
@@ -863,9 +978,9 @@
 
     return {
       lines,
-      info: [`${nStrokes} strokes${optimize ? ` (was ${(nH + nV) * nLayers})` : ''} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
+      info: [`${nStrokes} strokes${optimize ? ` (was ${(segs.h.length + segs.v.length + outCount) * nLayers})` : ''} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
              `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · E total ${E.toFixed(3)}`],
-      geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw },
+      geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw, angle: val('angle'), outline: outOn() },
       filename: `grid_${nH}h_${nV}v.gcode`,
     };
   }
@@ -893,6 +1008,7 @@
     const out   = mode === 'lines' ? buildLines() : buildDots();
     const g     = out.geom;
 
+    out.lines = applyRetract(out.lines, val('retract'), intVal('retract_speed'));
     document.getElementById('tab-gcode').value = out.lines.join('\n');
     document.getElementById('btn-download').disabled = false;
     $('btn-copy').disabled = false;
@@ -963,7 +1079,7 @@
 
   // Settings as a .json file: same shape as what is kept in localStorage.
   $('btn-export').addEventListener('click', () => {
-    const o = { tool: 'dot-grid', mode, pre_on: preOn(), optimize: optOn() };
+    const o = { tool: 'dot-grid', mode, pre_on: preOn(), optimize: optOn(), outline: outOn() };
     FIELDS.forEach(f => { o[f.id] = val(f.id); });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 2)], { type: 'application/json' }));
@@ -979,7 +1095,7 @@
     try {
       const o = JSON.parse(await file.text());
       if (!o || typeof o !== 'object' || (o.tool && o.tool !== 'dot-grid')) throw new Error('not a Dot / Line Grid settings file');
-      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false, optimize: o.optimize !== false };
+      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false, optimize: o.optimize !== false, outline: o.outline !== false };
       FIELDS.forEach(f => { if (Number.isFinite(o[f.id])) clean[f.id] = o[f.id]; });
       localStorage.setItem(STORE_KEY, JSON.stringify(clean));
       buildParams();

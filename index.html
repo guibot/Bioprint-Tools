@@ -45,16 +45,11 @@
   .logo-text { font-size: 13px; font-weight: 700; color: var(--text); }
   .logo-sub { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--text3); letter-spacing: 0.05em; }
 
-  #search-wrap { position: relative; }
-  #search-wrap svg { position: absolute; left: 9px; top: 50%; transform: translateY(-50%); color: var(--text3); pointer-events: none; }
-  #search {
-    width: 100%; background: var(--bg); border: 1px solid var(--border);
-    border-radius: 7px; padding: 7px 10px 7px 30px;
-    font-size: 12px; color: var(--text); font-family: 'JetBrains Mono', monospace;
-    outline: none; transition: border-color 0.2s;
+  #credit {
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; line-height: 1.6; color: var(--text3);
   }
-  #search:focus { border-color: var(--accent); }
-  #search::placeholder { color: var(--text3); }
+  #credit a { color: var(--text2); text-decoration: none; transition: color 0.12s; }
+  #credit a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 
   #nav { overflow-y: auto; flex: 1; padding: 8px 0 16px; }
   #nav::-webkit-scrollbar { width: 3px; }
@@ -76,6 +71,36 @@
   .nav-item:hover .nav-label { color: var(--text); }
   .nav-item.active .nav-thumb { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
   .nav-item.active .nav-label { color: var(--accent); font-weight: 600; }
+
+  /* ── G-CODE SHORTCUTS (click to copy, paste into the Duet console) ── */
+  #shortcuts { flex-shrink: 0; border-top: 1px solid var(--border); background: var(--surface); }
+  #shortcuts summary {
+    list-style: none; cursor: pointer; padding: 10px 18px;
+    display: flex; align-items: center; justify-content: space-between;
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+    letter-spacing: 0.12em; text-transform: uppercase; color: var(--text3);
+  }
+  #shortcuts summary::-webkit-details-marker { display: none; }
+  #shortcuts summary::after { content: '▾'; transition: transform 0.15s; }
+  #shortcuts:not([open]) summary::after { transform: rotate(-90deg); }
+  #shortcuts summary:hover { color: var(--text2); }
+  #shortcut-list { max-height: 42vh; overflow-y: auto; padding: 0 12px 12px; }
+  #shortcut-list::-webkit-scrollbar { width: 3px; }
+  #shortcut-list::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+  .sc-group { margin-top: 10px; }
+  .sc-group:first-child { margin-top: 0; }
+  .sc-title { font-size: 11px; font-weight: 600; color: var(--text2); padding: 0 6px 4px; }
+  .sc-item {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 5px 8px; margin-bottom: 4px; cursor: pointer; text-align: left;
+    font-family: inherit; color: inherit; transition: border-color 0.12s;
+  }
+  .sc-item:hover { border-color: var(--text3); }
+  .sc-item.copied { border-color: var(--green); }
+  .sc-desc { font-size: 10px; color: var(--text3); }
+  .sc-item.copied .sc-desc { color: var(--green); }
+  .sc-code { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--accent); user-select: all; }
 
   /* ── MAIN ── */
   #main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -131,12 +156,17 @@
           <div class="logo-sub">tools</div>
         </div>
       </div>
-      <div id="search-wrap">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input id="search" type="text" placeholder="Search tool…">
+      <div id="credit">
+        Made by:<br>
+        <a href="https://guilhermemartins.net" target="_blank" rel="noopener noreferrer">Guilherme Martins</a><br>
+        @ <a href="https://biolablisboa.pt/" target="_blank" rel="noopener noreferrer">BioLab Lisboa</a>
       </div>
     </div>
     <nav id="nav"></nav>
+    <details id="shortcuts" open>
+      <summary>G-code shortcuts</summary>
+      <div id="shortcut-list"></div>
+    </details>
   </aside>
 
   <div id="main">
@@ -150,7 +180,7 @@
         <div id="welcome">
           <div class="welcome-icon">B</div>
           <h2>Bioprinter Tools</h2>
-          <p>Select a tool from the sidebar to get started.<br>Each tool generates G-code for the bioprinter.</p>
+          <p>Select a tool from the sidebar to get started.</p>
         </div>
       </div>
     </div>
@@ -173,7 +203,6 @@
   const toolFrame   = document.getElementById('tool-frame');
   const loadingEl   = document.getElementById('loading');
   const errorEl     = document.getElementById('error-msg');
-  const searchInput = document.getElementById('search');
 
   // build sidebar
   TOOLS.forEach(tool => {
@@ -243,13 +272,67 @@
     }
   }
 
-  // search
-  searchInput.addEventListener('input', () => {
-    const q = searchInput.value.toLowerCase();
-    document.querySelectorAll('.nav-item').forEach(el => {
-      el.style.display = !q || el.dataset.label.toLowerCase().includes(q) ? '' : 'none';
+  // G-code shortcuts: click copies the command, ready to paste into the Duet console
+  const SHORTCUTS = [
+    { group: 'Extruder', items: [
+      ['Select tool',            'T0'],
+      ['Extruder 2 mm down',     'G1 E2 F60'],
+      ['Extruder 2 mm up',       'G1 E-2 F60'],
+    ]},
+    { group: 'BLTouch', items: [
+      ['Deploy probe',           'M280 P0 S10'],
+      ['Retract probe',          'M280 P0 S90'],
+    ]},
+    { group: 'Motors', items: [
+      ['Disable motors',         'M84'],
+    ]},
+    { group: 'Flow rate', items: [
+      ['Set flow to 90%',        'M221 S90'],
+      ['Set flow to 110%',       'M221 S110'],
+    ]},
+  ];
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true; } catch {}
+    const ta = document.createElement('textarea');                 // fallback when the Clipboard API is unavailable
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch {}
+    ta.remove();
+    return ok;
+  }
+
+  const scList = document.getElementById('shortcut-list');
+  SHORTCUTS.forEach(({ group, items }) => {
+    const g = document.createElement('div');
+    g.className = 'sc-group';
+    const title = document.createElement('div');
+    title.className = 'sc-title';
+    title.textContent = group;
+    g.appendChild(title);
+    items.forEach(([desc, code]) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'sc-item';
+      b.title = 'Click to copy';
+      const d = document.createElement('span'); d.className = 'sc-desc'; d.textContent = desc;
+      const c = document.createElement('span'); c.className = 'sc-code'; c.textContent = code;
+      b.append(d, c);
+      b.addEventListener('click', async () => {
+        const ok = await copyText(code);
+        d.textContent = ok ? 'Copied ✓' : 'Copy failed';
+        b.classList.toggle('copied', ok);
+        setTimeout(() => { d.textContent = desc; b.classList.remove('copied'); }, 1200);
+      });
+      g.appendChild(b);
     });
+    scList.appendChild(g);
   });
+
+  const scBox = document.getElementById('shortcuts');
+  try { if (localStorage.getItem('bioprinter.shortcuts.open') === '0') scBox.open = false; } catch {}
+  scBox.addEventListener('toggle', () => { try { localStorage.setItem('bioprinter.shortcuts.open', scBox.open ? '1' : '0'); } catch {} });
 </script>
 </body>
 </html>
