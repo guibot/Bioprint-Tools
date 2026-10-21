@@ -76,7 +76,7 @@
   .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
 
   .gcode-warning {
-    flex: 1; min-width: 0; margin: 0 0.25rem;
+    order: 10; flex: 1 1 100%; min-width: 0; margin: 0;   /* own row below the buttons, so it never gets squeezed */
     padding: 5px 10px; border-radius: 7px;
     background: rgba(232,154,154,0.10); border: 1px solid rgba(232,154,154,0.35);
     color: var(--danger); font-size: 11px; line-height: 1.45;
@@ -235,6 +235,10 @@
       { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
       { id: 'bed_y', label: 'Bed Y', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
     ]},
+    { label: 'Position', fields: [
+      { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 0, min: 0, max: () => val('bed_x'), step: 1, ...any },
+      { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 0, min: 0, max: () => val('bed_y'), step: 1, ...any },
+    ]},
     { label: 'Grid', fields: [
       { id: 'width',    label: 'Width',  unit: 'mm', value: 100, min: 1, max: () => val('bed_x'), step: 1, ...pos },
       { id: 'height',   label: 'Height', unit: 'mm', value: 100, min: 1, max: () => val('bed_y'), step: 1, ...pos },
@@ -243,23 +247,21 @@
       { id: 'points_y', label: 'Points Y', labels: { lines: 'Horizontal lines' }, unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
         ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_y)}` },
     ]},
-    { label: 'Position', fields: [
-      { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 0, min: 0, max: () => val('bed_x'), step: 1, ...any },
-      { id: 'origin_y', label: 'Origin Y', unit: 'mm', value: 0, min: 0, max: () => val('bed_y'), step: 1, ...any },
-    ]},
     { label: 'Pre-extrude', fields: [
       { id: 'pre_z',     label: 'Raise Z to',        unit: 'mm',     value: 20, min: 10, max: 60, step: 1,
         ok: v => v >= 10, hint: 'must be ≥ 10' },
       { id: 'pre_x',     label: 'Purge X',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_x'), step: 1, ...any },
       { id: 'pre_y',     label: 'Purge Y',           unit: 'mm',     value: 10, min: 0,  max: () => val('bed_y'), step: 1, ...any },
-      { id: 'pre_len',   label: 'Pre-extrude',       unit: 'mm',     value: 1,  min: 0,  max: 20,  step: 0.1 },
-      { id: 'pre_speed', label: 'Pre-extrude speed', unit: 'mm/min', value: 20, min: 5,  max: 600, step: 5, ...pos },
+      { id: 'pre_flow',  label: 'Pre-extrude flow',  unit: '%',      value: 100, min: 0, max: 500, step: 5 },
+      { id: 'pre_lift_z',     label: 'Lift Z after',   unit: 'mm',     value: 30,  min: 0,  max: 100, step: 1,
+        ok: v => v >= val('pre_z'), hint: 'must be ≥ Raise Z to' },
+      { id: 'pre_lift_speed', label: 'Lift speed',     unit: 'mm/min', value: 400, min: 60, max: 3000, step: 20, ...pos },
     ]},
     { label: 'Print', fields: [
       // dots
       { modes: ['dots'], id: 'print_height',  label: 'Print height',          unit: 'mm',     value: 0.2,   min: 0,  max: 3,     step: 0.05 },
       { modes: ['dots'], id: 'z_hop',         label: 'Z hop',                 unit: 'mm',     value: 5.0,   min: 0,  max: 30,    step: 0.5 },
-      { modes: ['dots'], id: 'flow_rate',     label: 'Extrusion per dot (E)', unit: '',       value: 0.022, min: 0,  max: 0.2,   step: 0.001 },
+      { id: 'flow_rate',     label: 'Extrusion per dot (E)', labels: { lines: 'Dot E (pre-extrude base)' }, unit: '',       value: 0.022, min: 0,  max: 0.2,   step: 0.001 },
       { modes: ['dots'], id: 'travel_speed',  label: 'Travel speed',          unit: 'mm/min', value: 600,   min: 60, max: 6000,  step: 10, ...pos },
       { modes: ['dots'], id: 'extrude_speed', label: 'Extrude speed',         unit: 'mm/min', value: 20,    min: 5,  max: 200,   step: 5,  ...pos },
       { modes: ['dots'], id: 'pause_time_ms', label: 'Pause',                 unit: 'ms',     value: 3000,  min: 0,  max: 10000, step: 100 },
@@ -272,6 +274,10 @@
       { modes: ['lines'], id: 'flow',         label: 'Flow',                  unit: '%',      value: 40,    min: 1,  max: 200,   step: 1 },
       { modes: ['lines'], id: 'temp',         label: 'Temperature',           unit: '°C',     value: 280,   min: 0,  max: 400,   step: 1 },
       { modes: ['lines'], id: 'travel_z',     label: 'Travel Z',              unit: 'mm',     value: 2,     min: 0,  max: 20,    step: 0.1 },
+    ]},
+    { label: 'End', fields: [
+      { id: 'final_z',     label: 'Final Z',     unit: 'mm',     value: 30,   min: 0,  max: 100,  step: 1 },
+      { id: 'final_speed', label: 'Final speed', unit: 'mm/min', value: 1000, min: 60, max: 6000, step: 60, ...pos },
     ]},
   ];
   const FIELDS = GROUPS.flatMap(g => g.fields);
@@ -592,14 +598,18 @@
   }
 
   // ── G-code ────────────────────────────────────────────────────
-  // Raise Z, go to the purge spot, extrude `pre_len` mm of E. Returns the E total afterwards.
-  function preExtrude(lines, travelSpeed) {
+  // Raise Z, go to the purge spot, extrude like one dot (flow_rate) scaled by pre_flow %. Returns the E total afterwards.
+  // Afterwards lifts Z slowly and travels to the grid origin (startX, startY).
+  function preExtrude(lines, travelSpeed, startX, startY) {
     if (!preOn()) return 0;
-    const z = val('pre_z'), x = val('pre_x'), y = val('pre_y'), len = val('pre_len'), sp = intVal('pre_speed');
+    const z = val('pre_z'), x = val('pre_x'), y = val('pre_y'), len = val('flow_rate') * val('pre_flow') / 100;
+    const sp = mode === 'dots' ? intVal('extrude_speed') : 20;   // lines mode has no extrude speed
     lines.push('; Pre-extrude');
     lines.push(`G1 Z${z.toFixed(2)} F${travelSpeed}`);
     lines.push(`G1 X${x.toFixed(3)} Y${y.toFixed(3)} F${travelSpeed}`);
-    if (len > 0) lines.push(`G1 E${len.toFixed(5)} F${sp} ; pre-extrude ${len} mm`);
+    if (len > 0) lines.push(`G1 E${len.toFixed(5)} F${sp} ; pre-extrude ${val('pre_flow')}% of a dot`);
+    lines.push(`G1 Z${val('pre_lift_z').toFixed(2)} F${intVal('pre_lift_speed')} ; lift Z`);
+    lines.push(`G1 X${startX.toFixed(3)} Y${startY.toFixed(3)} F${travelSpeed} ; travel to origin`);
     return len;
   }
 
@@ -628,7 +638,7 @@
     lines.push('G21 ; use mm');
     lines.push('G28 ; home all axes');
     lines.push('T0 ; select tool 0 - extrusor');
-    let e_total = preExtrude(lines, travel_speed);
+    let e_total = preExtrude(lines, travel_speed, origin_x, origin_y);
     lines.push(`G1 Z${z_hop.toFixed(2)} F${travel_speed}`);
 
     for (let j = 0; j < points_y; j++) {
@@ -646,7 +656,7 @@
       }
     }
     lines.push('; End of print');
-    lines.push(`G1 Z30 F${travel_speed} ; move Z to 30`);
+    lines.push(`G1 Z${val('final_z').toFixed(2)} F${intVal('final_speed')} ; move Z to final height`);
     lines.push('M104 S0 ; turn off hotend');
     lines.push('M140 S0 ; turn off bed');
     lines.push('M84 ; disable motors');
@@ -711,10 +721,10 @@
     lines.push(`M105`);
     lines.push(`M109 S${temp}`);
     lines.push(`G28`);
-    lines.push(`G1 Z${fmtZ(travelZ)} F3000`);
+    if (!preOn()) lines.push(`G1 Z${fmtZ(travelZ)} F3000`);   // with pre-extrude the first Z move is the raise to "Raise Z to"
     lines.push(`M82`);
     lines.push(`G92 E0`);
-    E = preExtrude(lines, spTravel);
+    E = preExtrude(lines, spTravel, startX, startY);
     lines.push(``);
     lines.push(`;LAYER_COUNT:${nLayers}`);
     lines.push(`M107`);
@@ -758,7 +768,7 @@
     }
 
     lines.push(`;--- END ---`);
-    lines.push(`G0 F3000 Z30 ; move Z to 30`);
+    lines.push(`G0 F${intVal('final_speed')} Z${fmtZ(val('final_z'))} ; move Z to final height`);
     lines.push(`M82`);
     lines.push(`M104 S0`);
     lines.push(`;End of Gcode`);

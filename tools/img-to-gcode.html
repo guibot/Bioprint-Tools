@@ -117,7 +117,7 @@
   .btn.primary:disabled:hover { background: var(--accent); border-color: var(--accent); }
 
   .gcode-warning {
-    flex: 1; min-width: 0; margin: 0 0.25rem;
+    order: 10; flex: 1 1 100%; min-width: 0; margin: 0;   /* own row below the buttons, so it never gets squeezed */
     padding: 5px 10px; border-radius: 7px;
     background: rgba(232,154,154,0.10); border: 1px solid rgba(232,154,154,0.35);
     color: var(--danger); font-size: 11px; line-height: 1.45;
@@ -235,9 +235,9 @@
       <div class="field" data-min="0" data-max="@bed_y"><label for="origin_y">Origin Y</label><input id="origin_y" type="number" value="0" step="1"><span class="unit">mm</span></div>
     </div>
 
-    <div class="param-group" data-modes="dots crosshatch spiral">
+    <div class="param-group">
       <div class="param-group-label">Extrusion</div>
-      <div class="field" data-min="0" data-max="0.2"><label for="flow_rate">Extrusion (E)</label><input id="flow_rate" type="number" value="0.05" step="0.001"><span class="unit"></span></div>
+      <div class="field" data-min="0" data-max="0.2"><label for="flow_rate" id="flow-rate-label">Extrusion (E)</label><input id="flow_rate" type="number" value="0.05" step="0.001"><span class="unit"></span></div>
       <div class="field" id="pause-row" data-modes="dots" data-min="0" data-max="5000"><label for="pause_ms">Pause</label><input id="pause_ms" type="number" value="100" step="50"><span class="unit">ms</span></div>
     </div>
 
@@ -269,14 +269,21 @@
       <div class="field" data-min="10" data-max="60"><label for="pre_z">Raise Z to</label><input id="pre_z" type="number" value="20" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="@bed_x"><label for="pre_x">Purge X</label><input id="pre_x" type="number" value="10" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="@bed_y"><label for="pre_y">Purge Y</label><input id="pre_y" type="number" value="10" step="1"><span class="unit">mm</span></div>
-      <div class="field" data-min="0" data-max="20"><label for="pre_len">Pre-extrude</label><input id="pre_len" type="number" value="1" step="0.1"><span class="unit">mm</span></div>
-      <div class="field" data-min="5" data-max="600"><label for="pre_speed">Pre-extrude speed</label><input id="pre_speed" type="number" value="20" step="5"><span class="unit">mm/min</span></div>
+      <div class="field" data-min="0" data-max="500"><label for="pre_flow">Pre-extrude flow</label><input id="pre_flow" type="number" value="100" step="5"><span class="unit">%</span></div>
+      <div class="field" data-min="0" data-max="100"><label for="pre_lift_z">Lift Z after</label><input id="pre_lift_z" type="number" value="30" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="60" data-max="3000"><label for="pre_lift_speed">Lift speed</label><input id="pre_lift_speed" type="number" value="400" step="20"><span class="unit">mm/min</span></div>
     </div>
 
     <div class="param-group">
       <div class="param-group-label">Print</div>
       <div class="field" data-min="0" data-max="3"><label for="print_height">Print height</label><input id="print_height" type="number" value="0.2" step="0.05"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="30"><label for="z_hop">Z hop</label><input id="z_hop" type="number" value="2.0" step="0.5"><span class="unit">mm</span></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label">End</div>
+      <div class="field" data-min="0" data-max="100"><label for="final_z">Final Z</label><input id="final_z" type="number" value="30" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="60" data-max="6000"><label for="final_speed">Final speed</label><input id="final_speed" type="number" value="1000" step="60"><span class="unit">mm/min</span></div>
     </div>
 
   </div>
@@ -362,6 +369,8 @@
     document.querySelectorAll('[data-modes]').forEach(el => {
       el.style.display = el.dataset.modes.split(' ').includes(mode) ? '' : 'none';
     });
+    const pathMode = ['raster', 'contour', 'scaffold'].includes(mode);
+    document.getElementById('flow-rate-label').textContent = pathMode ? 'Dot E (pre-extrude base)' : 'Extrusion (E)';
   }
 
   // ── IMAGE PROCESSING ─────────────────────────────────────────────────────────
@@ -930,7 +939,8 @@
 
     const preOn = document.getElementById('pre_on').checked;
     const preZ = val('pre_z'), preX = val('pre_x'), preY = val('pre_y');
-    const preLen = val('pre_len'), preSpeed = intVal('pre_speed');
+    const preLen = val('flow_rate') * val('pre_flow') / 100;   // like one dot, scaled by the flow %
+    const preSpeed = 20;
 
     const bedX = val('bed_x'), bedY = val('bed_y');
     const outside = ox < 0 || oy < 0 || ox + w > bedX || oy + h > bedY;
@@ -977,13 +987,15 @@
         '; Pre-extrude',
         `G1 Z${preZ.toFixed(2)} F1000`,
         `G1 X${preX.toFixed(3)} Y${preY.toFixed(3)} F3000`,
-        ...(preLen > 0 ? [`G1 E${preLen.toFixed(5)} F${preSpeed} ; pre-extrude ${preLen} mm`, 'G92 E0 ; reset E for the print'] : []),
+        ...(preLen > 0 ? [`G1 E${preLen.toFixed(5)} F${preSpeed} ; pre-extrude ${val('pre_flow')}% of a dot`, 'G92 E0 ; reset E for the print'] : []),
+        `G1 Z${val('pre_lift_z').toFixed(2)} F${intVal('pre_lift_speed')} ; lift Z`,
+        `G1 X${ox.toFixed(3)} Y${oy.toFixed(3)} F3000 ; travel to origin`,
       ] : []),
       `G1 Z${zh.toFixed(2)} F1000`,
     ];
     const footer = [
       '; End of print',
-      'G1 Z30 F1000 ; move Z to 30',
+      `G1 Z${val('final_z').toFixed(2)} F${intVal('final_speed')} ; move Z to final height`,
       'M104 S0',
       'M140 S0',
       'M84',
@@ -1097,7 +1109,7 @@
     clearTimeout(typeTimer);
     typeTimer = setTimeout(generate, 150);
   });
-  const PRE_IDS = ['pre_z', 'pre_x', 'pre_y', 'pre_len', 'pre_speed'];
+  const PRE_IDS = ['pre_z', 'pre_x', 'pre_y', 'pre_flow', 'pre_lift_z', 'pre_lift_speed'];
   function applyPre() {                      // pre-extrude fields only show while the checkbox is on
     const on = document.getElementById('pre_on').checked;
     PRE_IDS.forEach(id => { document.getElementById(id).parentElement.style.display = on ? '' : 'none'; });
@@ -1157,8 +1169,11 @@
     pre_z:        ['must be ≥ 10', v => v >= 10],
     pre_x:        ['must be a number', () => true],
     pre_y:        ['must be a number', () => true],
-    pre_len:      ['must be ≥ 0', v => v >= 0],
-    pre_speed:    ['must be > 0', v => v > 0],
+    pre_flow:     ['must be ≥ 0', v => v >= 0],
+    pre_lift_z:   ['must be ≥ Raise Z to', v => v >= val('pre_z')],
+    pre_lift_speed: ['must be > 0', v => v > 0],
+    final_z:      ['must be ≥ 0', v => v >= 0],
+    final_speed:  ['must be > 0', v => v > 0],
   };
 
   // ── WIRING ───────────────────────────────────────────────────────────────────
