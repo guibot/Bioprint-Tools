@@ -197,14 +197,12 @@
   }
   .ghost-btn:hover { color: var(--text); border-color: var(--text3); }
   .ghost-card {
-    position: absolute; z-index: 5; width: 230px; max-height: 70%; overflow-y: auto;
+    position: absolute; z-index: 5; width: 230px; pointer-events: none;
     background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
     padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);
     font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text2);
   }
-  .ghost-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; color: var(--text); font-weight: 600; }
-  .ghost-card header button { background: none; border: none; color: var(--text3); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
-  .ghost-card header button:hover { color: var(--text); }
+  .ghost-card header { margin-bottom: 2px; color: var(--text); font-weight: 600; }
   .ghost-card .sub { color: var(--text3); font-size: 10px; margin-bottom: 8px; }
   .ghost-card dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; margin: 0; }
   .ghost-card dt { color: var(--text3); }
@@ -293,9 +291,13 @@
       <div class="field" data-min="10" data-max="60"><label for="pre_z">Raise Z to</label><input id="pre_z" type="number" value="20" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="@bed_x"><label for="pre_x">Purge X</label><input id="pre_x" type="number" value="10" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="@bed_y"><label for="pre_y">Purge Y</label><input id="pre_y" type="number" value="10" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="60" data-max="6000"><label for="pre_travel_speed">Purge travel speed</label><input id="pre_travel_speed" type="number" value="800" step="20"><span class="unit">mm/min</span></div>
       <div class="field" data-min="0" data-max="20"><label for="pre_len">Pre-extrude</label><input id="pre_len" type="number" value="1" step="0.1"><span class="unit">mm</span></div>
       <div class="field" data-min="0" data-max="500"><label for="pre_flow">Pre-extrude flow</label><input id="pre_flow" type="number" value="100" step="5"><span class="unit">%</span></div>
       <div class="field" data-min="0" data-max="10000"><label for="pre_pause">Pre-extrude pause</label><input id="pre_pause" type="number" value="1000" step="100"><span class="unit">ms</span></div>
+      <div class="field" data-min="0" data-max="30"><label for="pre_wipe_z">Wipe Z</label><input id="pre_wipe_z" type="number" value="2" step="0.1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="30"><label for="pre_wipe_len">Wipe length (+X)</label><input id="pre_wipe_len" type="number" value="5" step="0.5"><span class="unit">mm</span></div>
+      <div class="field" data-min="5" data-max="600"><label for="pre_wipe_speed">Wipe speed</label><input id="pre_wipe_speed" type="number" value="60" step="5"><span class="unit">mm/min</span></div>
       <div class="field" data-min="0" data-max="100"><label for="pre_lift_z">Lift Z after</label><input id="pre_lift_z" type="number" value="30" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="60" data-max="3000"><label for="pre_lift_speed">Lift speed</label><input id="pre_lift_speed" type="number" value="400" step="20"><span class="unit">mm/min</span></div>
     </div>
@@ -315,7 +317,7 @@
     <div class="param-group">
       <div class="param-group-label">End</div>
       <div class="field" data-min="0" data-max="100"><label for="final_z">Final Z</label><input id="final_z" type="number" value="30" step="1"><span class="unit">mm</span></div>
-      <div class="field" data-min="60" data-max="6000"><label for="final_speed">Final speed</label><input id="final_speed" type="number" value="1000" step="60"><span class="unit">mm/min</span></div>
+      <div class="field" data-min="60" data-max="6000"><label for="final_speed">Final speed</label><input id="final_speed" type="number" value="600" step="60"><span class="unit">mm/min</span></div>
     </div>
 
   </div>
@@ -977,48 +979,51 @@
   }
 
   function hideGhostCard() {
+    cardGhost = null;
     const c = document.querySelector('.ghost-card');
     if (c) c.remove();
   }
 
-  // Clicking the preview over a ghost opens a floating card with the parameters it was made with.
-  function onCanvasClick(e) {
-    hideGhostCard();
+  // Hovering a ghost in the preview shows a floating card with the parameters it was made with.
+  let cardGhost = null;
+  function onCanvasMove(e) {
     const canvas = e.currentTarget;
-    if (!ghostTf || !ghosts.length) return;
     const rect = canvas.getBoundingClientRect();
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
-    const { ml, mt, plotH, scale, vx0, vy0 } = ghostTf;
-    const x = vx0 + (cx - ml) / scale, y = vy0 + (mt + plotH - cy) / scale;
-    const g = [...ghosts].reverse().find(g => x >= g.box[0] && x <= g.box[2] && y >= g.box[1] && y <= g.box[3]);
-    if (!g) return;
+    let g = null;
+    if (ghostTf && ghosts.length) {
+      const { ml, mt, plotH, scale, vx0, vy0 } = ghostTf;
+      const x = vx0 + (cx - ml) / scale, y = vy0 + (mt + plotH - cy) / scale;
+      g = [...ghosts].reverse().find(g => x >= g.box[0] && x <= g.box[2] && y >= g.box[1] && y <= g.box[3]) || null;
+    }
+    if (!g) { hideGhostCard(); return; }
 
-    const card = document.createElement('div');
-    card.className = 'ghost-card';
-    const head = document.createElement('header');
-    const title = document.createElement('span');
-    title.textContent = 'Ghost #' + g.n;
-    const close = document.createElement('button');
-    close.textContent = '×'; close.title = 'Close';
-    close.addEventListener('click', hideGhostCard);
-    head.append(title, close);
-    const sub = document.createElement('div');
-    sub.className = 'sub';
-    const d = new Date(g.ts), pad = v => String(v).padStart(2, '0');
-    sub.textContent = `${g.tool} · ${g.mode} · ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-      + (g.simplified ? ' · outline only (too many points)' : '');
-    const dl = document.createElement('dl');
-    (g.params || []).forEach(([k, v]) => {
-      const dt = document.createElement('dt'), dd = document.createElement('dd');
-      dt.textContent = k; dd.textContent = v;
-      dl.append(dt, dd);
-    });
-    card.append(head, sub, dl);
     const wrap = canvas.closest('.preview-wrap');
-    wrap.appendChild(card);
+    let card = wrap.querySelector('.ghost-card');
+    if (!card || cardGhost !== g.n) {
+      hideGhostCard();
+      cardGhost = g.n;
+      card = document.createElement('div');
+      card.className = 'ghost-card';
+      const head = document.createElement('header');
+      head.textContent = 'Ghost #' + g.n;
+      const sub = document.createElement('div');
+      sub.className = 'sub';
+      const d = new Date(g.ts), pad = v => String(v).padStart(2, '0');
+      sub.textContent = `${g.tool} · ${g.mode} · ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+        + (g.simplified ? ' · outline only (too many points)' : '');
+      const dl = document.createElement('dl');
+      (g.params || []).forEach(([k, v]) => {
+        const dt = document.createElement('dt'), dd = document.createElement('dd');
+        dt.textContent = k; dd.textContent = v;
+        dl.append(dt, dd);
+      });
+      card.append(head, sub, dl);
+      wrap.appendChild(card);
+    }
     const wr = wrap.getBoundingClientRect();
-    let left = rect.left - wr.left + cx + 12, top = rect.top - wr.top + cy + 12;
-    if (left + card.offsetWidth > wrap.clientWidth) left = Math.max(0, rect.left - wr.left + cx - card.offsetWidth - 12);
+    let left = rect.left - wr.left + cx + 14, top = rect.top - wr.top + cy + 14;
+    if (left + card.offsetWidth > wrap.clientWidth) left = Math.max(0, rect.left - wr.left + cx - card.offsetWidth - 14);
     if (top + card.offsetHeight > wrap.clientHeight) top = Math.max(0, wrap.clientHeight - card.offsetHeight - 4);
     card.style.left = left + 'px'; card.style.top = top + 'px';
   }
@@ -1197,9 +1202,13 @@
       'T0 ; select tool 0',
       ...(preOn ? [
         '; Pre-extrude',
-        `G1 Z${preZ.toFixed(2)} F1000`,
-        `G1 X${preX.toFixed(3)} Y${preY.toFixed(3)} F3000`,
-        ...(preLen > 0 ? [`G1 E${preLen.toFixed(5)} F${preSpeed} ; pre-extrude ${val('pre_len')} mm at ${val('pre_flow')}%`, ...(prePause > 0 ? [`G4 P${prePause} ; wait ${prePause}ms`] : []), 'G92 E0 ; reset E for the print'] : []),
+        `G1 Z${preZ.toFixed(2)} F${intVal('pre_travel_speed')}`,
+        `G1 X${preX.toFixed(3)} Y${preY.toFixed(3)} F${intVal('pre_travel_speed')}`,
+        ...(val('pre_wipe_len') > 0 ? [   // lower to wipe height, then extrude while moving sideways
+          `G1 Z${val('pre_wipe_z').toFixed(2)} F${intVal('pre_lift_speed')} ; lower to wipe height`,
+          `G1 X${(preX + val('pre_wipe_len')).toFixed(3)}${preLen > 0 ? ` E${preLen.toFixed(5)}` : ''} F${intVal('pre_wipe_speed')} ; purge ${val('pre_len')} mm at ${val('pre_flow')}% while moving ${val('pre_wipe_len')} mm`,
+        ] : (preLen > 0 ? [`G1 E${preLen.toFixed(5)} F${preSpeed} ; pre-extrude ${val('pre_len')} mm at ${val('pre_flow')}%`] : [])),
+        ...(preLen > 0 ? [...(prePause > 0 ? [`G4 P${prePause} ; wait ${prePause}ms`] : []), 'G92 E0 ; reset E for the print'] : []),
         `G1 Z${val('pre_lift_z').toFixed(2)} F${intVal('pre_lift_speed')} ; lift Z`,
         `G1 X${ox.toFixed(3)} Y${oy.toFixed(3)} F3000 ; travel to origin`,
       ] : []),
@@ -1208,6 +1217,7 @@
     const footer = [
       '; End of print',
       `G1 Z${val('final_z').toFixed(2)} F${intVal('final_speed')} ; move Z to final height`,
+      ...(preOn ? [`G1 X${preX.toFixed(3)} Y${preY.toFixed(3)} F${intVal('pre_travel_speed')} ; go to purge position`] : []),
       'M104 S0',
       'M140 S0',
       'M84',
@@ -1321,7 +1331,7 @@
     clearTimeout(typeTimer);
     typeTimer = setTimeout(generate, 150);
   });
-  const PRE_IDS = ['pre_z', 'pre_x', 'pre_y', 'pre_len', 'pre_flow', 'pre_pause', 'pre_lift_z', 'pre_lift_speed'];
+  const PRE_IDS = ['pre_z', 'pre_x', 'pre_y', 'pre_len', 'pre_flow', 'pre_pause', 'pre_travel_speed', 'pre_wipe_z', 'pre_wipe_len', 'pre_wipe_speed', 'pre_lift_z', 'pre_lift_speed'];
   function applyPre() {                      // pre-extrude fields only show while the checkbox is on
     const on = document.getElementById('pre_on').checked;
     PRE_IDS.forEach(id => { document.getElementById(id).parentElement.style.display = on ? '' : 'none'; });
@@ -1384,6 +1394,10 @@
     pre_len:      ['must be ≥ 0', v => v >= 0],
     pre_flow:     ['must be ≥ 0', v => v >= 0],
     pre_pause:    ['must be ≥ 0', v => v >= 0],
+    pre_travel_speed: ['must be > 0', v => v > 0],
+    pre_wipe_z:   ['must be ≥ 0', v => v >= 0],
+    pre_wipe_len: ['must be ≥ 0', v => v >= 0],
+    pre_wipe_speed: ['must be > 0', v => v > 0],
     pre_lift_z:   ['must be ≥ Raise Z to', v => v >= val('pre_z')],
     pre_lift_speed: ['must be > 0', v => v > 0],
     retract:      ['must be ≥ 0', v => v >= 0],
@@ -1398,7 +1412,8 @@
   document.getElementById('btn-download').addEventListener('click', download);
   document.getElementById('btn-ghost').addEventListener('click', ghostFromCurrent);
   document.getElementById('btn-ghost-clear').addEventListener('click', clearGhosts);
-  document.getElementById('canvas').addEventListener('click', onCanvasClick);
+  document.getElementById('canvas').addEventListener('mousemove', onCanvasMove);
+  document.getElementById('canvas').addEventListener('mouseleave', hideGhostCard);
   document.getElementById('btn-copy').addEventListener('click', copyGcode);
   document.getElementById('mode').addEventListener('change', onModeChange);   // runs before the auto-generate handler
   document.querySelectorAll('#view-seg button').forEach(b => b.addEventListener('click', () => {
@@ -1420,11 +1435,19 @@
   const defaults  = {};
   paramEls().forEach(el => { defaults[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
 
+  // Purge settings (pre_on + every pre_* field) are shared with the other tools through localStorage
+  // (keep this block in sync between tools).
+  const PURGE_KEY = 'bioprinter.purge.v1';
   function saveParams() {
     try {
-      const o = {};
-      paramEls().forEach(el => { o[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+      const o = {}, purge = {};
+      paramEls().forEach(el => {
+        o[el.id] = el.type === 'checkbox' ? el.checked : el.value;
+        if (el.id === 'pre_on') purge.pre_on = el.checked;
+        else if (el.id.startsWith('pre_')) { const n = parseFloat(el.value); if (Number.isFinite(n)) purge[el.id] = n; }
+      });
       localStorage.setItem(STORE_KEY, JSON.stringify(o));
+      localStorage.setItem(PURGE_KEY, JSON.stringify(purge));
     } catch {}
   }
   function applyParams(o) {
@@ -1435,10 +1458,14 @@
   }
   paramsEl.addEventListener('input',  saveParams);
   paramsEl.addEventListener('change', saveParams);
-  try { applyParams(JSON.parse(localStorage.getItem(STORE_KEY)) || {}); } catch {}
+  try {
+    const o = { ...(JSON.parse(localStorage.getItem(STORE_KEY)) || {}), ...(JSON.parse(localStorage.getItem(PURGE_KEY)) || {}) };
+    if (String(o.final_speed) === '1000') delete o.final_speed;   // old default → use the new one
+    applyParams(o);
+  } catch {}
 
   document.getElementById('btn-reset').addEventListener('click', () => {
-    try { localStorage.removeItem(STORE_KEY); } catch {}
+    try { localStorage.removeItem(STORE_KEY); localStorage.removeItem(PURGE_KEY); } catch {}
     applyParams(defaults);
     onModeChange(); applyPre(); updateFills(); generate();
   });
