@@ -150,6 +150,30 @@
     resize: none; outline: none; overflow-y: auto;
   }
   .gcode-output.active { display: block; }
+
+  /* ghosts: earlier experiments on the same tray (shared by all tools) */
+  .preview-wrap { position: relative; }
+  .param-group-label.with-actions { display: flex; align-items: center; justify-content: space-between; }
+  .ghost-actions { display: flex; gap: 4px; }
+  .ghost-btn {
+    background: none; border: 1px solid var(--border2); border-radius: 5px;
+    padding: 1px 8px; font-family: 'JetBrains Mono', monospace; font-size: 10px; font-weight: 600;
+    letter-spacing: 0.08em; color: var(--text3); cursor: pointer; transition: all 0.15s;
+  }
+  .ghost-btn:hover { color: var(--text); border-color: var(--text3); }
+  .ghost-card {
+    position: absolute; z-index: 5; width: 230px; max-height: 70%; overflow-y: auto;
+    background: var(--surface2); border: 1px solid var(--border2); border-radius: 8px;
+    padding: 10px 12px; box-shadow: 0 6px 24px rgba(0,0,0,0.45);
+    font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--text2);
+  }
+  .ghost-card header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px; color: var(--text); font-weight: 600; }
+  .ghost-card header button { background: none; border: none; color: var(--text3); font-size: 14px; line-height: 1; cursor: pointer; padding: 0 2px; }
+  .ghost-card header button:hover { color: var(--text); }
+  .ghost-card .sub { color: var(--text3); font-size: 10px; margin-bottom: 8px; }
+  .ghost-card dl { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; margin: 0; }
+  .ghost-card dt { color: var(--text3); }
+  .ghost-card dd { margin: 0; text-align: right; color: var(--text); }
 </style>
 
 <div class="tool">
@@ -234,8 +258,8 @@
   const any  = { ok: () => true };
   const GROUPS = [
     { label: 'Work area', fields: [
-      { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
-      { id: 'bed_y', label: 'Bed Y', unit: 'mm', value: 200, min: 50, max: 600, step: 5, ...pos },
+      { id: 'bed_x', label: 'Bed X', unit: 'mm', value: 310, min: 50, max: 600, step: 5, ...pos },
+      { id: 'bed_y', label: 'Bed Y', unit: 'mm', value: 220, min: 50, max: 600, step: 5, ...pos },
     ]},
     { label: 'Position', fields: [
       { id: 'origin_x', label: 'Origin X', unit: 'mm', value: 0, min: 0, max: () => val('bed_x'), step: 1, ...any },
@@ -340,6 +364,7 @@
       const title = document.createElement('div');
       title.className = 'param-group-label';
       title.textContent = g.label;
+      if (g.label === 'Position') { title.classList.add('with-actions'); title.innerHTML = '<span>Position</span>' + '<span class="ghost-actions"><button class="ghost-btn" id="btn-ghost" title="Keep the current print as a faint ghost on the preview">GHOST</button><button class="ghost-btn" id="btn-ghost-clear" title="Remove all ghosts">CLEAR</button></span>'; }
       group.appendChild(title);
       if (g.label === 'Print') {
         const c = document.createElement('label');
@@ -566,6 +591,12 @@
     ctx.strokeRect(bx0 + 0.5, by0 + 0.5, bx1 - bx0 - 1, by1 - by0 - 1);
     ctx.restore();
 
+    ghostTf = { ml, mt, plotH, scale, vx0, vy0 };
+    ctx.save();
+    ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
+    drawGhosts(ctx, mapX, mapY, C);
+    ctx.restore();
+
     // pre-extrude spot
     ctx.save();
     ctx.beginPath(); ctx.rect(ml, mt, plotW, plotH); ctx.clip();
@@ -625,6 +656,125 @@
     }
     ctx.fillStyle = C.orange;
     ctx.beginPath(); ctx.arc(mapX(ox), mapY(oy), r + 1, 0, Math.PI * 2); ctx.fill();
+  }
+
+
+  // ── Ghosts ────────────────────────────────────────────────────
+  // Earlier experiments on the same tray, drawn faintly under the current print. They describe the
+  // physical tray, so every tool shares them through localStorage (keep this block in sync between tools).
+  const GHOST_KEY = 'bioprinter.ghosts.v1', GHOST_MAX_COORDS = 40000;
+  const loadGhosts = () => { try { const a = JSON.parse(localStorage.getItem(GHOST_KEY)); return Array.isArray(a) ? a : []; } catch { return []; } };
+  const saveGhosts = () => { try { localStorage.setItem(GHOST_KEY, JSON.stringify(ghosts)); } catch {} };
+  let ghosts = loadGhosts();
+  let ghostTf = null;                                  // set by draw(): preview px ↔ mm, for clicking a ghost
+
+  // box: [x0, y0, x1, y1] · dots: [[x, y]…] · paths: [[x, y, x, y…]…] (all mm) · params: [[label, value]…]
+  function addGhost(mode, box, dots, paths, params) {
+    const r2 = v => Math.round(v * 100) / 100;
+    dots  = dots.map(p => [r2(p[0]), r2(p[1])]);
+    paths = paths.map(p => p.map(r2));
+    let simplified = false;
+    if (dots.length * 2 + paths.reduce((n, p) => n + p.length, 0) > GHOST_MAX_COORDS) { dots = []; paths = []; simplified = true; }
+    const n = ghosts.reduce((m, g) => Math.max(m, g.n), 0) + 1;
+    ghosts.push({ n, tool: 'Dot / Line Grid', mode, ts: Date.now(), box: box.map(r2), dots, paths, params, simplified });
+    saveGhosts();
+    hideGhostCard();
+    draw();
+  }
+
+  function clearGhosts() {
+    ghosts = [];
+    saveGhosts();
+    hideGhostCard();
+    draw();
+  }
+
+  function drawGhosts(ctx, mapX, mapY, C) {
+    ctx.font = '10px "JetBrains Mono", monospace';
+    ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    ghosts.forEach(g => {
+      const [x0, y0, x1, y1] = g.box;
+      ctx.strokeStyle = ctx.fillStyle = C.text3;
+      ctx.globalAlpha = 0.55;
+      ctx.setLineDash([3, 3]); ctx.lineWidth = 1;
+      ctx.strokeRect(mapX(x0), mapY(y1), mapX(x1) - mapX(x0), mapY(y0) - mapY(y1));
+      ctx.setLineDash([]);
+      ctx.beginPath();
+      g.paths.forEach(p => {
+        ctx.moveTo(mapX(p[0]), mapY(p[1]));
+        for (let k = 2; k < p.length; k += 2) ctx.lineTo(mapX(p[k]), mapY(p[k + 1]));
+      });
+      ctx.lineWidth = 1.5; ctx.stroke();
+      g.dots.forEach(p => { ctx.beginPath(); ctx.arc(mapX(p[0]), mapY(p[1]), 2.2, 0, Math.PI * 2); ctx.fill(); });
+      ctx.globalAlpha = 0.9;
+      ctx.fillText('#' + g.n, mapX(x0) + 3, mapY(y1) + 3);
+      ctx.globalAlpha = 1;
+    });
+  }
+
+  function hideGhostCard() {
+    const c = document.querySelector('.ghost-card');
+    if (c) c.remove();
+  }
+
+  // Clicking the preview over a ghost opens a floating card with the parameters it was made with.
+  function onCanvasClick(e) {
+    hideGhostCard();
+    const canvas = e.currentTarget;
+    if (!ghostTf || !ghosts.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
+    const { ml, mt, plotH, scale, vx0, vy0 } = ghostTf;
+    const x = vx0 + (cx - ml) / scale, y = vy0 + (mt + plotH - cy) / scale;
+    const g = [...ghosts].reverse().find(g => x >= g.box[0] && x <= g.box[2] && y >= g.box[1] && y <= g.box[3]);
+    if (!g) return;
+
+    const card = document.createElement('div');
+    card.className = 'ghost-card';
+    const head = document.createElement('header');
+    const title = document.createElement('span');
+    title.textContent = 'Ghost #' + g.n;
+    const close = document.createElement('button');
+    close.textContent = '×'; close.title = 'Close';
+    close.addEventListener('click', hideGhostCard);
+    head.append(title, close);
+    const sub = document.createElement('div');
+    sub.className = 'sub';
+    const d = new Date(g.ts), pad = v => String(v).padStart(2, '0');
+    sub.textContent = `${g.tool} · ${g.mode} · ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
+      + (g.simplified ? ' · outline only (too many points)' : '');
+    const dl = document.createElement('dl');
+    (g.params || []).forEach(([k, v]) => {
+      const dt = document.createElement('dt'), dd = document.createElement('dd');
+      dt.textContent = k; dd.textContent = v;
+      dl.append(dt, dd);
+    });
+    card.append(head, sub, dl);
+    const wrap = canvas.closest('.preview-wrap');
+    wrap.appendChild(card);
+    const wr = wrap.getBoundingClientRect();
+    let left = rect.left - wr.left + cx + 12, top = rect.top - wr.top + cy + 12;
+    if (left + card.offsetWidth > wrap.clientWidth) left = Math.max(0, rect.left - wr.left + cx - card.offsetWidth - 12);
+    if (top + card.offsetHeight > wrap.clientHeight) top = Math.max(0, wrap.clientHeight - card.offsetHeight - 4);
+    card.style.left = left + 'px'; card.style.top = top + 'px';
+  }
+
+  function ghostFromCurrent() {
+    if (!last) return;
+    const { kind, ox, oy, width, height, px, py } = last;
+    const dots = [], paths = [];
+    if (kind === 'lines') {
+      const segs = gridSegments(ox, oy, width, height, py, px, last.angle);
+      [...segs.h, ...segs.v].forEach(g => paths.push([g.x1, g.y1, g.x2, g.y2]));
+      if (last.outline) paths.push([ox, oy, ox + width, oy, ox + width, oy + height, ox, oy + height, ox, oy]);
+    } else {
+      const dx = px > 1 ? width / (px - 1) : 0, dy = py > 1 ? height / (py - 1) : 0;
+      for (let j = 0; j < py; j++) for (let i = 0; i < px; i++) dots.push([ox + i * dx, oy + j * dy]);
+    }
+    const params = FIELDS.filter(f => f.modes.includes(mode) && !isPre(f) && f.id !== 'bed_x' && f.id !== 'bed_y')
+      .map(f => [fieldLabel(f), `${val(f.id)}${f.unit ? ' ' + f.unit : ''}`]);
+    addGhost(mode, [ox, oy, ox + width, oy + height], dots, paths, params);
   }
 
   // ── G-code ────────────────────────────────────────────────────
@@ -1104,6 +1254,12 @@
       setMeta([['Could not load settings: ' + err.message, 'error']]);
     }
   });
+
+  paramsEl.addEventListener('click', e => {
+    if (e.target.closest('#btn-ghost')) ghostFromCurrent();
+    else if (e.target.closest('#btn-ghost-clear')) clearGhosts();
+  });
+  $('canvas').addEventListener('click', onCanvasClick);
 
   new ResizeObserver(draw).observe($('tab-preview'));
   const onResize = () => {
