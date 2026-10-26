@@ -796,18 +796,17 @@
     m.forEach(row => row.forEach(v => { if (v) remaining++; }));
 
     const toMm = ([i, j]) => [ox + i * sx, oy + j * sy];
+    const pix = Math.min(sx, sy);
+    const pathLen = q => q.reduce((n, c, k) => n + (k ? Math.hypot(c[0] - q[k - 1][0], c[1] - q[k - 1][1]) : 0), 0);
     const strokes = [];
     let pen = [ox, oy];
     while (remaining > 0) {
       // start: nearest free pixel with at most one free neighbour (an end of the remaining line);
       // for a closed loop with no ends, nearest free pixel
       let best = null, bd = Infinity, bestAny = null, bdAny = Infinity;
-      // the very first stroke can start at the centre or at the outer end instead of near the origin
-      const ref = !strokes.length && startMode !== 'auto' ? centre : pen;
-      const sign = !strokes.length && startMode === 'edge' ? -1 : 1;
       for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
         if (!free(i, j)) continue;
-        const [x, y] = toMm([i, j]), d = sign * Math.hypot(x - ref[0], y - ref[1]);
+        const [x, y] = toMm([i, j]), d = Math.hypot(x - pen[0], y - pen[1]);
         if (d < bdAny) { bdAny = d; bestAny = [i, j]; }
         if (neighbours(i, j, free).length <= 1 && d < bd) { bd = d; best = [i, j]; }
       }
@@ -844,8 +843,17 @@
         chain.push(chain[0]);                         // closed loop: finish where it started
       let pts = chain.map(toMm);
       pts = simplifyPath(smoothPath(pts, 2), Math.min(sx, sy) * 0.25);
-      if (pts.length >= 2 || !strokes.length) strokes.push({ pts: pts.length >= 2 ? pts : [pts[0], pts[0]], z: zp, hop: zh, layer: 0 });
+      if (pts.length < 2) pts = [pts[0], pts[0]];
+      const prev = strokes[strokes.length - 1];
+      if (prev && Math.hypot(pts[0][0] - pen[0], pts[0][1] - pen[1]) <= 3 * pix) prev.pts.push(...pts);   // tiny gap: keep drawing
+      else if (!prev || pathLen(pts) >= 5 * pix) strokes.push({ pts, z: zp, hop: zh, layer: 0 });          // shorter bits are skeleton crumbs
       pen = strokes[strokes.length - 1].pts.slice(-1)[0];
+    }
+    // direction of the main line: from the centre of the image outwards, or the other way round
+    if (strokes.length && startMode !== 'auto') {
+      const pts = strokes[0].pts, d = q => Math.hypot(q[0] - centre[0], q[1] - centre[1]);
+      const startsInside = d(pts[0]) <= d(pts[pts.length - 1]);
+      if (startsInside !== (startMode === 'center')) pts.reverse();
     }
     return strokes;
   }
@@ -1546,8 +1554,8 @@
     bed_y:        ['must be > 0', v => v > 0],
     width:        ['must be > 0', v => v > 0],
     height:       ['must be > 0', v => v > 0],
-    points_x:     ['must be an integer ≥ 2', v => Number.isInteger(v) && v >= 2],
-    points_y:     ['must be an integer ≥ 2', v => Number.isInteger(v) && v >= 2],
+    points_x:     ['must be an integer from 2 to 500', v => Number.isInteger(v) && v >= 2 && v <= 500],
+    points_y:     ['must be an integer from 2 to 500', v => Number.isInteger(v) && v >= 2 && v <= 500],
     origin_x:     ['must be a number', () => true],
     origin_y:     ['must be a number', () => true],
     print_height: ['must be ≥ 0', v => v >= 0],

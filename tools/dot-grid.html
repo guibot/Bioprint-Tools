@@ -275,9 +275,9 @@
       { id: 'width',    label: 'Width',  unit: 'mm', value: 100, min: 1, max: () => val('bed_x'), step: 1, ...pos },
       { id: 'height',   label: 'Height', unit: 'mm', value: 100, min: 1, max: () => val('bed_y'), step: 1, ...pos },
       { id: 'points_x', label: 'Points X', labels: { lines: 'Vertical lines' },   unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
-        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_x), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_x)}` },
+        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_x) && v <= 500, hint: () => `must be an integer from ${fieldMin(FIELD.points_x)} to 500` },
       { id: 'points_y', label: 'Points Y', labels: { lines: 'Horizontal lines' }, unit: '', value: 5, min: { dots: 2, lines: 1 }, max: 50, step: 1,
-        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y), hint: () => `must be an integer ≥ ${fieldMin(FIELD.points_y)}` },
+        ok: v => Number.isInteger(v) && v >= fieldMin(FIELD.points_y) && v <= 500, hint: () => `must be an integer from ${fieldMin(FIELD.points_y)} to 500` },
       { modes: ['lines'], id: 'angle', label: 'Rotate lines', unit: '°', value: 0, min: -90, max: 90, step: 1, ...any },
     ]},
     { label: 'Pre-extrude', fields: [
