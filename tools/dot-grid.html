@@ -1,8 +1,16 @@
 <style>
   .tool { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 2rem; min-height: 100%; align-items: start; }
-  @media (max-width: 960px) { .tool { grid-template-columns: 1fr; } }
-
   .tool-params, #params { display: flex; flex-direction: column; gap: 1.25rem; }
+
+  /* the parameter column scrolls on its own, so the preview stays in view */
+  .tool-params {
+    position: sticky; top: 2.5rem; align-self: start;
+    max-height: calc(100vh - 5rem); overflow-y: auto; padding-right: 12px;
+  }
+  .tool-params::-webkit-scrollbar { width: 3px; }
+  .tool-params::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }      /* only visible while the mouse is over the column */
+  .tool-params:hover::-webkit-scrollbar-thumb { background: var(--border2); }
+  @media (max-width: 960px) { .tool { grid-template-columns: 1fr; } .tool-params { position: static; max-height: none; overflow: visible; padding-right: 0; } }
 
   .param-group { display: flex; flex-direction: column; gap: 6px; }
   .param-group-label {
