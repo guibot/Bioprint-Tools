@@ -785,8 +785,15 @@
     return [...simplifyPath(pts.slice(0, bi + 1), tol).slice(0, -1), ...simplifyPath(pts.slice(bi), tol)];
   }
 
-  function singleLineStrokes(pixels, nx, ny, ox, oy, sx, sy, zp, zh, startMode, centre) {
-    const m = cleanSkeleton(thinMask(pixels, nx, ny), nx, ny, 3);
+  function singleLineStrokes(pixels, nx, ny, ox, oy, sx, sy, zp, zh, startMode, centre, tol, passes) {
+    const thin = thinMask(pixels, nx, ny);
+    let area = 0, bones = 0;
+    pixels.forEach(row => row.forEach(v => { if (v > 0) area++; }));
+    thin.forEach(row => row.forEach(v => { if (v) bones++; }));
+    // spurs shorter than the line is thick are bumps on its edge, not real branches
+    const thickness = bones ? area / bones : 1;
+    const spur = Math.min(40, Math.max(3, Math.round(thickness * 1.2)));
+    const m = cleanSkeleton(thin, nx, ny, spur);
     const N8 = [[1, 0], [0, 1], [-1, 0], [0, -1], [1, 1], [-1, 1], [-1, -1], [1, -1]];
     const on = (i, j) => i >= 0 && i < nx && j >= 0 && j < ny && m[j][i] === 1;
     const seen = pixels.map(row => row.map(() => false));
@@ -834,6 +841,15 @@
         return nb[0] || null;
       };
       if (strokes.length && chain.length < 3) continue;           // a stray corner pixel, not a branch
+      if (strokes.length) {                                       // a bit that hugs the printed line is a twin of it, not a branch
+        const inChain = new Set(chain.map(([i, j]) => j * nx + i));
+        const near = ([i, j], r) => {
+          for (let b = j - r; b <= j + r; b++) for (let a = i - r; a <= i + r; a++)
+            if (on(a, b) && seen[b][a] && !inChain.has(b * nx + a)) return true;
+          return false;
+        };
+        if (chain.every(q => near(q, 3)) || (chain.length < 12 && near(chain[0], 2) && near(chain[chain.length - 1], 2))) continue;
+      }
       if (strokes.length) {
         const h = touch(chain[0], chain[1]);
         if (h) chain.unshift(h);
@@ -842,7 +858,7 @@
       if (chain.length >= 2 && Math.abs(chain[0][0] - chain[chain.length - 1][0]) <= 1 && Math.abs(chain[0][1] - chain[chain.length - 1][1]) <= 1 && chain.length > 4)
         chain.push(chain[0]);                         // closed loop: finish where it started
       let pts = chain.map(toMm);
-      pts = simplifyPath(smoothPath(pts, 2), Math.min(sx, sy) * 0.25);
+      pts = simplifyPath(smoothPath(pts, passes), tol);
       if (pts.length < 2) pts = [pts[0], pts[0]];
       const prev = strokes[strokes.length - 1];
       if (prev && Math.hypot(pts[0][0] - pen[0], pts[0][1] - pen[1]) <= 3 * pix) prev.pts.push(...pts);   // tiny gap: keep drawing
@@ -863,7 +879,13 @@
     const ds = Math.max(0.05, Math.min(sx, sy) / 2);
     const mask = pixelMask(pixels, nx, ny, ox, oy, w, h);
 
-    if (mode === 'singleline') return singleLineStrokes(pixels, nx, ny, ox, oy, sx, sy, zp, zh, o.start, [ox + w / 2, oy + h / 2]);
+    if (mode === 'singleline') {
+      // The centerline is found on a finer grid (about 300 points) so the line never breaks, however few
+      // points are asked for; Points X / Y then only sets how coarsely the path is simplified.
+      const hi = o.hi;
+      return singleLineStrokes(hi.pixels, hi.nx, hi.ny, ox, oy, w / (hi.nx - 1), h / (hi.ny - 1), zp, zh, o.start,
+                               [ox + w / 2, oy + h / 2], Math.min(sx, sy) * 0.25, 2 * hi.k);
+    }
 
     if (mode === 'raster') return rasterStrokes(mask, ox, oy, w, h, o.angle, o.spacing, ds, zp, zh, 0);
 
@@ -1360,6 +1382,13 @@
 
     let bodyLines, strokes = null, metaText = null;
     if (isPath) {
+      if (mode === 'singleline') {
+        const k = Math.max(1, Math.ceil(300 / Math.max(nx, ny)));
+        const hx = (nx - 1) * k + 1, hy = (ny - 1) * k + 1;
+        const hiPixels = k > 1 ? await processImage(loadedImageSrc, hx, hy) : pixels;
+        if (seq !== genSeq) return;
+        lineOpts.hi = { pixels: hiPixels, nx: hx, ny: hy, k };
+      }
       strokes = buildStrokes(mode, pixels, nx, ny, ox, oy, w, h, zh, zp, lineOpts);
       if (strokes.length > 20000) {
         showError(`Too many strokes (${strokes.length}) — increase the line spacing or reduce the layers`);
