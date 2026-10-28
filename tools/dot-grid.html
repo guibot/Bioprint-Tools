@@ -24,6 +24,15 @@
   }
 
   .check.off { display: none; }
+  .field.select { cursor: default; }
+  .field.select label { flex: none; }
+  .field.select select {
+    position: relative; flex: 1; min-width: 0; height: 100%; padding: 0;
+    background: transparent; border: none; outline: none; cursor: pointer;
+    font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    color: var(--text); text-align: right; text-align-last: right;
+  }
+  .field.select option { background: var(--surface2); color: var(--text); }
   .check { display: flex; align-items: center; gap: 8px; height: 28px; font-size: 13px; color: var(--text2); cursor: pointer; user-select: none; }
   .check input { accent-color: var(--accent); margin: 0; cursor: pointer; }
 
@@ -148,6 +157,7 @@
   .legend i.hline  { width: 14px; height: 3px; border-radius: 2px; background: var(--green); }
   .legend i.vline  { width: 14px; height: 3px; border-radius: 2px; background: var(--accent); }
   .legend i.travel { width: 14px; height: 2px; border-radius: 1px; background: var(--accent); opacity: 0.6; }
+  .legend i.retrace { width: 14px; height: 0; border-radius: 0; border-top: 2px dashed var(--danger); }
 
   /* gcode */
   .gcode-output {
@@ -315,6 +325,7 @@
       { modes: ['lines'], id: 'flow',         label: 'Flow',                  unit: '%',      value: 40,    min: 1,  max: 200,   step: 1 },
       { modes: ['lines'], id: 'temp',         label: 'Temperature',           unit: '°C',     value: 280,   min: 0,  max: 400,   step: 1 },
       { modes: ['lines'], id: 'travel_z',     label: 'Travel Z',              unit: 'mm',     value: 2,     min: 0,  max: 20,    step: 0.1 },
+      { modes: ['lines'], id: 'retrace_hop',  label: 'Retrace lift',          unit: 'mm',     value: 0.3,   min: 0,  max: 5,     step: 0.05 },
     ]},
     { label: 'Retract', fields: [
       { id: 'retract',       label: 'Retract',       unit: 'mm',     value: 0,  min: 0,  max: 1,   step: 0.01 },
@@ -362,14 +373,32 @@
       const o = { mode };
       FIELDS.forEach(f => { o[f.id] = val(f.id); });
       o.pre_on = preOn();
-      o.optimize = optOn();
+      o.path = pathMode();
+      o.retrace = retraceMode();
       o.outline = outOn();
       localStorage.setItem(STORE_KEY, JSON.stringify(o));
       savePurge(o);
     } catch {}
   }
   const preOn  = () => !!$('pre_on') && $('pre_on').checked;
-  const optOn  = () => !!$('optimize') && $('optimize').checked;
+  const PATHS = {                            // Lines mode: how the grid is walked
+    rows:           'rows, then columns',
+    fewest:         'fewest lifts',
+    serpentine:     'continuous: grid, then outline',
+    'outline-first':'continuous: outline, then grid',
+  };
+  const RETRACES = { hop: 'lifted, no extrusion', dry: 'no extrusion', extrude: 'extrude again' };
+  const pathMode    = () => ($('path_mode') ? $('path_mode').value : 'rows');
+  const retraceMode = () => ($('retrace_mode') ? $('retrace_mode').value : 'hop');
+  const continuous  = () => pathMode() === 'serpentine' || pathMode() === 'outline-first';
+  function applyPath() {                     // fields that only matter for some paths
+    const lines = mode === 'lines';
+    $('retrace-row').classList.toggle('off', !lines || !continuous());
+    $('outline-row').classList.toggle('off', !lines || pathMode() === 'outline-first');
+    $('retrace_hop').parentElement.classList.toggle('off', !lines || !continuous() || retraceMode() !== 'hop');
+    if (lines) $('legend').innerHTML = '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="outline"></i>outline</span>'
+      + (continuous() ? '<span><i class="retrace"></i>retrace</span>' : '') + '<span><i class="purge"></i>pre-extrude</span>';
+  }
   const outOn  = () => !!$('outline') && $('outline').checked;
   const isPre  = f => f.id.startsWith('pre_');
   function applyPre() {                      // pre-extrude fields only show while the checkbox is on
@@ -393,11 +422,16 @@
       if (g.label === 'Position') { title.classList.add('with-actions'); title.innerHTML = '<span>Position</span>' + '<span class="ghost-actions"><button class="ghost-btn" id="btn-ghost" title="Keep the current print as a faint ghost on the preview">GHOST</button><button class="ghost-btn" id="btn-ghost-clear" title="Remove all ghosts">CLEAR</button></span>'; }
       group.appendChild(title);
       if (g.label === 'Print') {
-        const c = document.createElement('label');
-        c.className = 'check';
-        c.id = 'optimize-row';
-        c.innerHTML = `<input id="optimize" type="checkbox"${saved.optimize === false ? '' : ' checked'}> Optimize path (fewer lifts)`;
-        group.appendChild(c);
+        const sel = (id, rowId, label, opts, cur) => {
+          const r = document.createElement('div');
+          r.className = 'field select';
+          r.id = rowId;
+          r.innerHTML = `<label for="${id}">${label}</label><select id="${id}">` +
+            Object.entries(opts).map(([v, t]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${t}</option>`).join('') + '</select>';
+          group.appendChild(r);
+        };
+        sel('path_mode', 'path-row', 'Path', PATHS, PATHS[saved.path] ? saved.path : 'rows');
+        sel('retrace_mode', 'retrace-row', 'Retrace', RETRACES, RETRACES[saved.retrace] ? saved.retrace : 'hop');
         const o = document.createElement('label');
         o.className = 'check';
         o.id = 'outline-row';
@@ -436,11 +470,11 @@
       $(f.id).min = fieldMin(f);
     });
     applyPre();
-    $('optimize-row').classList.toggle('off', mode !== 'lines');
-    $('outline-row').classList.toggle('off', mode !== 'lines');
+    $('path-row').classList.toggle('off', mode !== 'lines');
     $('legend').innerHTML = mode === 'dots'
       ? '<span><i class="start"></i>start</span><span><i class="dot"></i>dot</span><span><i class="travel"></i>travel order</span><span><i class="purge"></i>pre-extrude</span>'
-      : '<span><i class="start"></i>start</span><span><i class="hline"></i>horizontal</span><span><i class="vline"></i>vertical</span><span><i class="outline"></i>outline</span><span><i class="purge"></i>pre-extrude</span>';
+      : '';
+    applyPath();
     updateFields();
   }
 
@@ -500,7 +534,7 @@
     if (rafId) return;
     rafId = requestAnimationFrame(() => { rafId = 0; generate(); });
   }
-  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') applyPre(); if (['pre_on', 'optimize', 'outline'].includes(e.target.id)) generate(); });
+  paramsEl.addEventListener('change', e => { if (e.target.id === 'pre_on') applyPre(); if (['path_mode', 'retrace_mode'].includes(e.target.id)) applyPath(); if (['pre_on', 'path_mode', 'retrace_mode', 'outline'].includes(e.target.id)) generate(); });
   paramsEl.addEventListener('input', () => {   // while typing: short debounce
     updateFields();
     clearTimeout(typeTimer);
@@ -513,7 +547,7 @@
     const errors = [];
     FIELDS.forEach(f => {
       const el = $(f.id);
-      if (!f.modes.includes(mode) || (isPre(f) && !preOn())) { el.parentElement.classList.remove('invalid'); return; }
+      if (!f.modes.includes(mode) || (isPre(f) && !preOn()) || el.parentElement.classList.contains('off')) { el.parentElement.classList.remove('invalid'); return; }
       const v  = parseFloat(el.value);
       const ok = f.ok || (x => x >= 0);
       const valid = Number.isFinite(v) && ok(v);
@@ -658,6 +692,14 @@
       if (last.outline) {                               // printed last: the rectangle itself
         ctx.strokeStyle = C.orange; ctx.lineWidth = clamp(lw * scale, 1.5, 5);
         ctx.strokeRect(mapX(gx0), mapY(gy1), (gx1 - gx0) * scale, (gy1 - gy0) * scale);
+      }
+      if (last.retraces && last.retraces.length) {     // continuous paths: where the nozzle goes over a line twice
+        ctx.save();
+        ctx.strokeStyle = C.danger; ctx.lineWidth = 2; ctx.setLineDash([5, 4]);
+        ctx.beginPath();
+        last.retraces.forEach(pts => { ctx.moveTo(mapX(pts[0][0]), mapY(pts[0][1])); pts.slice(1).forEach(q => ctx.lineTo(mapX(q[0]), mapY(q[1]))); });
+        ctx.stroke();
+        ctx.restore();
       }
       ctx.fillStyle = C.orange;
       ctx.beginPath(); ctx.arc(mapX(ox), mapY(oy), 4.5, 0, Math.PI * 2); ctx.fill();
@@ -1147,6 +1189,141 @@
     return out;
   }
 
+  // ── Line paths ────────────────────────────────────────────────
+  // A plan is a list of pieces walked in order from the pen:
+  //   { type: 'travel', pts: [p] }        lift, move to p, lower
+  //   { type: 'print' | 'retrace', pts }  moves at print height from the current position (pts[0])
+  // 'retrace' moves pass over lines that are already printed (or over the bare border) and are not
+  // extruded again unless asked for.
+
+  // rows, then columns: horizontal lines from the top one down, alternating left→right / right→left,
+  // then vertical lines from the left one, alternating top→bottom / bottom→top; a lift between lines.
+  function rowsPlan(segs) {
+    const plan = [];
+    const hs = [...segs.h].sort((a, b) => b.c - a.c), vs = [...segs.v].sort((a, b) => a.c - b.c);
+    const add = (g, fwd) => {
+      const a = [g.x1, g.y1], b = [g.x2, g.y2];
+      plan.push({ type: 'travel', pts: [fwd ? a : b] }, { type: 'print', pts: fwd ? [a, b] : [b, a] });
+    };
+    hs.forEach((g, k) => add(g, k % 2 === 0));
+    vs.forEach((g, k) => add(g, k % 2 === 1));
+    return plan;
+  }
+
+  // Continuous paths: the lines are joined along the border of the rectangle, so the nozzle never lifts.
+  //   serpentine     horizontal lines as a serpentine, then the vertical ones, then (optional) the outline
+  //   outline-first  the outline, then both serpentines
+  // A border stretch that belongs to the drawing and is not printed yet is printed; any other is a retrace.
+  function continuousPlan(segs, x0, y0, width, height, kind, outline) {
+    const P = 2 * (width + height), e = 1e-6;
+    const corners = [0, width, width + height, 2 * width + height];
+    const perim = ([x, y]) => {                         // position along the border, counter-clockwise from (x0, y0)
+      const t = 1e-4;
+      if (Math.abs(y - y0) < t) return x - x0;
+      if (Math.abs(x - (x0 + width)) < t) return width + (y - y0);
+      if (Math.abs(y - (y0 + height)) < t) return width + height + (x0 + width - x);
+      return (2 * width + height + (y0 + height - y)) % P;
+    };
+    const at = q => {
+      q = ((q % P) + P) % P;
+      if (q <= width) return [x0 + q, y0];
+      if (q <= width + height) return [x0 + width, y0 + q - width];
+      if (q <= 2 * width + height) return [x0 + width - (q - width - height), y0 + height];
+      return [x0, y0 + height - (q - 2 * width - height)];
+    };
+    const onBorder = ([x, y]) => Math.min(Math.abs(x - x0), Math.abs(x - x0 - width), Math.abs(y - y0), Math.abs(y - y0 - height)) < 1e-4;
+
+    // drawing on the border: grid lines lying on it, and the whole outline once it is due
+    const gridBorder = [];
+    [...segs.h, ...segs.v].forEach(g => {
+      const m = [(g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2];
+      if (!onBorder(m)) return;
+      const c = perim(m), L = Math.hypot(g.x2 - g.x1, g.y2 - g.y1) / 2;
+      gridBorder.push([c - L, c + L]);
+    });
+    let drawing = gridBorder;
+    const printed = [];
+    const inside = (list, q) => { q = ((q % P) + P) % P; return list.some(([a, b]) => [q - P, q, q + P].some(r => r > a - e && r < b + e)); };
+    const due = q => inside(drawing, q) && !inside(printed, q);
+
+    const plan = [];
+    let pen = null;
+    const push = (type, pts) => {
+      const last = plan[plan.length - 1];
+      if (last && last.type === type && type !== 'travel') last.pts.push(...pts.slice(1));
+      else plan.push({ type, pts });
+      pen = pts[pts.length - 1];
+    };
+    // walk the border from position sa, `len` mm in direction dir (+1 / -1)
+    const walk = (sa, len, dir) => {
+      if (len < e) return;
+      const us = new Set([0, len]);
+      const toU = q => { const u = (((q - sa) * dir) % P + P) % P; if (u > e && u < len - e) us.add(u); };
+      corners.forEach(toU);
+      [...drawing, ...printed].forEach(([a, b]) => { toU(a); toU(b); });
+      const u = [...us].sort((a, b) => a - b);
+      for (let k = 0; k < u.length - 1; k++) {
+        const q1 = sa + dir * u[k], q2 = sa + dir * u[k + 1];
+        const type = due(sa + dir * (u[k] + u[k + 1]) / 2) ? 'print' : 'retrace';
+        if (type === 'print') { const lo = Math.min(q1, q2), hi = Math.max(q1, q2); const sh = Math.floor(lo / P) * P; printed.push([lo - sh, hi - sh]); }
+        push(type, [at(q1), at(q2)]);
+      }
+    };
+    const dist = (sa, sb, dir) => ((((sb - sa) * dir) % P) + P) % P;
+    const goTo = p => {                                  // along the border, the shorter way
+      const sa = perim(pen), sb = perim(p);
+      const f = dist(sa, sb, 1), b = dist(sa, sb, -1);
+      if (f <= b) walk(sa, f, 1); else walk(sa, b, -1);
+    };
+    const line = (g, fwd) => {
+      const a = fwd ? [g.x1, g.y1] : [g.x2, g.y2], b = fwd ? [g.x2, g.y2] : [g.x1, g.y1];
+      if (pen) goTo(a); else push('travel', [a]);
+      if (onBorder([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2])) goTo(b);
+      else push('print', [a, b]);
+    };
+    const serpentine = (list, firstFwd) => list.forEach((g, k) => line(g, (k % 2 === 0) === firstFwd));
+    // the vertical serpentine starts at whichever end is closest along the border
+    const columns = () => {
+      const vs = [...segs.v].sort((a, b) => a.c - b.c);
+      if (!pen) { serpentine(vs, true); return; }
+      let best = null;
+      for (const order of [vs, [...vs].reverse()]) for (const fwd of [true, false]) {
+        const g = order[0]; if (!g) return;
+        const p = fwd ? [g.x1, g.y1] : [g.x2, g.y2], sa = perim(pen), sb = perim(p);
+        const d = Math.min(dist(sa, sb, 1), dist(sa, sb, -1));
+        if (!best || d < best.d) best = { d, order, fwd };
+      }
+      serpentine(best.order, best.fwd);
+    };
+    // print what is left of the outline, going round in the direction that needs less
+    const finishOutline = () => {
+      const sa = perim(pen), bps = new Set([0, P]);
+      [...drawing, ...printed].forEach(([a, b]) => { bps.add(((a % P) + P) % P); bps.add(((b % P) + P) % P); });
+      const u = [...bps].sort((a, b) => a - b), need = { 1: 0, '-1': 0 };
+      for (let k = 0; k < u.length - 1; k++) {
+        if (u[k + 1] - u[k] < e || !due((u[k] + u[k + 1]) / 2)) continue;
+        for (const dir of [1, -1]) {                     // reach the near end first, then the far one; else go all round
+          const near = dist(sa, dir > 0 ? u[k] : u[k + 1], dir), far = dist(sa, dir > 0 ? u[k + 1] : u[k], dir);
+          need[dir] = Math.max(need[dir], near <= far + e && u[k + 1] - u[k] < P - e ? far : P);
+        }
+      }
+      if (need[1] > 0 || need[-1] > 0) { if (need[1] <= need[-1]) walk(sa, need[1], 1); else walk(sa, need[-1], -1); }
+    };
+
+    const hs = [...segs.h].sort((a, b) => b.c - a.c);
+    if (!hs.length && !segs.v.length) return plan;
+    const first = hs[0] || segs.v[0];
+    if (kind === 'outline-first') {
+      push('travel', [[first.x1, first.y1]]);
+      drawing = [[0, P]];
+      walk(perim(pen), P, 1);
+    }
+    serpentine(hs, true);
+    columns();
+    if (kind === 'serpentine' && outline) { drawing = [[0, P]]; finishOutline(); }
+    return plan;
+  }
+
   // Grid lines through the same points: points_y horizontal lines spanning the width,
   // points_x vertical lines spanning the height. Ported from grid-generator.html.
   function buildLines() {
@@ -1207,24 +1384,49 @@
     lines.push(`M107`);
     lines.push(``);
 
-    const optimize = optOn();
+    const path = pathMode(), retrace = retraceMode(), hop = val('retrace_hop');
     const segs = gridSegments(startX, startY, width, height, nH, nV, val('angle'));
-    let nStrokes = 0, penX = startX, penY = startY, travelMm = 0;
-    const outline = outOn();
-    const outCount = outline ? outlineTrails(segs, startX, startY, width, height, startX, startY).length : 0;
+    let nStrokes = 0, penX = startX, penY = startY, travelMm = 0, retraceMm = 0;
+    const outline = outOn() && path !== 'outline-first';
+    const outlineDone = path === 'outline-first' || (path === 'serpentine' && outline);
+
+    // pieces of a plan → G-code
+    const emit = (piece, liftZ, printZ) => {
+      const pts = piece.pts;
+      if (piece.type === 'travel') {
+        const [x, y] = pts[0];
+        lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+        travelMm += Math.hypot(x - penX, y - penY);
+        lines.push(`G0 F${spTravel} X${fmtXY(x)} Y${fmtXY(y)}`);
+        lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
+        nStrokes++;
+        [penX, penY] = [x, y];
+        return;
+      }
+      const extrude = piece.type === 'print' || retrace === 'extrude';
+      if (piece.type === 'retrace') {
+        lines.push(`;  retrace (${RETRACES[retrace]})`);
+        if (retrace === 'hop') lines.push(`G1 F3000 Z${fmtZ(printZ + hop)}`);
+      }
+      for (let p = 1; p < pts.length; p++) {
+        const len = Math.hypot(pts[p][0] - pts[p - 1][0], pts[p][1] - pts[p - 1][1]);
+        if (len < 1e-6) continue;
+        if (piece.type === 'retrace') retraceMm += len;
+        if (extrude) {
+          E += calcExtrusion(len, layerH, lw, flow);
+          lines.push(`G1 F${spPrint} X${fmtXY(pts[p][0])} Y${fmtXY(pts[p][1])} E${fmt(E)}`);
+        } else lines.push(`G1 F${spPrint} X${fmtXY(pts[p][0])} Y${fmtXY(pts[p][1])}`);
+      }
+      if (piece.type === 'retrace' && retrace === 'hop') lines.push(`G1 F3000 Z${fmtZ(printZ)}`);
+      [penX, penY] = pts[pts.length - 1];
+    };
     const emitTrail = (trail, label, liftZ, printZ) => {
       lines.push(`;  ${label}`);
-      lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
-      travelMm += Math.hypot(trail[0][0] - penX, trail[0][1] - penY);
-      lines.push(`G0 F${spTravel} X${fmtXY(trail[0][0])} Y${fmtXY(trail[0][1])}`);
-      lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
-      for (let p = 1; p < trail.length; p++) {
-        E += calcExtrusion(Math.hypot(trail[p][0] - trail[p - 1][0], trail[p][1] - trail[p - 1][1]), layerH, lw, flow);
-        lines.push(`G1 F${spPrint} X${fmtXY(trail[p][0])} Y${fmtXY(trail[p][1])} E${fmt(E)}`);
-      }
-      nStrokes++;
-      [penX, penY] = trail[trail.length - 1];
+      emit({ type: 'travel', pts: [trail[0]] }, liftZ, printZ);
+      emit({ type: 'print', pts: trail }, liftZ, printZ);
     };
+    const contPlan = path === 'serpentine' || path === 'outline-first'
+      ? continuousPlan(segs, startX, startY, width, height, path, outline) : null;
 
     for (let layer = 0; layer < nLayers; layer++) {
       const printZ = layerH * (layer + 1);
@@ -1234,29 +1436,19 @@
       lines.push(`;LAYER:${layer}`);
       lines.push(``);
 
-      if (optimize) {
+      if (path === 'fewest') {
         const trails = orderTrails(gridTrails(segs, penX, penY, startX, startY, width, height), penX, penY);
         trails.forEach((trail, k) => emitTrail(trail, `Path ${k + 1} / ${trails.length}`, liftZ, printZ));
-        lines.push(``);
+      } else if (contPlan) {
+        lines.push(`;  Continuous path (${PATHS[path]})`);
+        contPlan.forEach(piece => emit(piece, liftZ, printZ));
       } else {
-      nStrokes += segs.h.length + segs.v.length;
-      [['Horizontal lines', segs.h], ['Vertical lines', segs.v]].forEach(([title, list]) => {
-        lines.push(`;  ${title}`);
-        list.forEach(g => {
-          lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
-          travelMm += Math.hypot(g.x1 - penX, g.y1 - penY); [penX, penY] = [g.x2, g.y2];
-          lines.push(`G0 F${spTravel} X${fmtXY(g.x1)} Y${fmtXY(g.y1)}`);
-          lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
-          E += calcExtrusion(Math.hypot(g.x2 - g.x1, g.y2 - g.y1), layerH, lw, flow);
-          lines.push(`G1 F${spPrint} X${fmtXY(g.x2)} Y${fmtXY(g.y2)} E${fmt(E)}`);
-        });
-        lines.push(``);
-      });
-      const lastSeg = segs.v[segs.v.length - 1] || segs.h[segs.h.length - 1];
-      if (lastSeg) [penX, penY] = [lastSeg.x2, lastSeg.y2];
+        lines.push(`;  Rows, then columns`);
+        rowsPlan(segs).forEach(piece => emit(piece, liftZ, printZ));
       }
+      lines.push(``);
 
-      if (outline) {
+      if (outline && !outlineDone) {
         outlineTrails(segs, startX, startY, width, height, penX, penY).forEach((trail, k, all) => emitTrail(trail, `Outline ${k + 1} / ${all.length}`, liftZ, printZ));
         lines.push(``);
       }
@@ -1271,9 +1463,10 @@
 
     return {
       lines,
-      info: [`${nStrokes} strokes${optimize ? ` (was ${(segs.h.length + segs.v.length + outCount) * nLayers})` : ''} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
-             `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · travel ${travelMm.toFixed(0)} mm · E total ${E.toFixed(3)}`],
-      geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw, angle: val('angle'), outline: outOn() },
+      info: [`${nStrokes} lift${nStrokes === 1 ? '' : 's'} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
+             `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · travel ${travelMm.toFixed(0)} mm${contPlan ? ` · retrace ${retraceMm.toFixed(0)} mm` : ''} · E total ${E.toFixed(3)}`],
+      geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw, angle: val('angle'), outline: outOn() || path === 'outline-first',
+              retraces: contPlan ? contPlan.filter(q => q.type === 'retrace').map(q => q.pts) : [] },
       filename: `grid_${nH}h_${nV}v.gcode`,
     };
   }
@@ -1372,7 +1565,7 @@
 
   // Settings as a .json file: same shape as what is kept in localStorage.
   $('btn-export').addEventListener('click', () => {
-    const o = { tool: 'dot-grid', mode, pre_on: preOn(), optimize: optOn(), outline: outOn() };
+    const o = { tool: 'dot-grid', mode, pre_on: preOn(), path: pathMode(), retrace: retraceMode(), outline: outOn() };
     FIELDS.forEach(f => { o[f.id] = val(f.id); });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([JSON.stringify(o, null, 2)], { type: 'application/json' }));
@@ -1388,7 +1581,7 @@
     try {
       const o = JSON.parse(await file.text());
       if (!o || typeof o !== 'object' || (o.tool && o.tool !== 'dot-grid')) throw new Error('not a Dot / Line Grid settings file');
-      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false, optimize: o.optimize !== false, outline: o.outline !== false };
+      const clean = { mode: o.mode === 'lines' ? 'lines' : 'dots', pre_on: o.pre_on !== false, path: PATHS[o.path] ? o.path : 'rows', retrace: RETRACES[o.retrace] ? o.retrace : 'hop', outline: o.outline !== false };
       FIELDS.forEach(f => { if (Number.isFinite(o[f.id])) clean[f.id] = o[f.id]; });
       localStorage.setItem(STORE_KEY, JSON.stringify(clean));
       savePurge(clean);
