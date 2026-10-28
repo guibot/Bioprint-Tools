@@ -987,10 +987,12 @@
     return trails;
   }
 
-  // Walks the grid in as few strokes (= pen lifts) as possible: the lines are split at their
-  // crossings, then walked in greedy trails that start at odd-degree crossings and go straight
-  // on whenever possible. Returns trails as lists of [x, y] corners.
-  function gridTrails(segs, penX, penY) {
+  // Walks the grid in as few strokes (= pen lifts) and as little travel as possible. The lines are
+  // split at their crossings. Every stroke has to end at an odd crossing (they all lie on the border of
+  // the rectangle), so neighbouring ones along the border are paired by a travel move; the grid plus
+  // those moves is then walked in one Euler path (going straight on whenever possible) and cut at the
+  // travel moves. Works the same for a rotated grid. Returns trails as lists of [x, y] corners.
+  function gridTrails(segs, penX, penY, x0, y0, width, height) {
     const nodes = new Map();                            // rounded coordinates -> node index
     const pts = [], adj = [], edges = [];
     const node = (x, y) => {
@@ -1014,39 +1016,135 @@
     segs.h.forEach(g => split(g, segs.v));
     segs.v.forEach(g => split(g, segs.h));
 
+    const nReal = edges.length;
+    const D = (a, b) => Math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1]);
+    const perim = ([x, y]) => {                         // position along the border, counter-clockwise from (x0, y0)
+      const e = 1e-4;
+      if (Math.abs(y - y0) < e) return x - x0;
+      if (Math.abs(x - (x0 + width)) < e) return width + (y - y0);
+      if (Math.abs(y - (y0 + height)) < e) return width + height + (x0 + width - x);
+      return 2 * width + height + (y0 + height - y);
+    };
+    const odd = pts.map((p, n) => n).filter(n => adj[n].length % 2).sort((a, b) => perim(pts[a]) - perim(pts[b]));
+    let ends = null;                                    // the two odd crossings left unpaired: start and end
+    if (odd.length >= 2) {
+      let best = null;
+      for (const off of [0, 1]) {
+        const pairs = [];
+        for (let k = 0; k < odd.length; k += 2) pairs.push([odd[(k + off) % odd.length], odd[(k + 1 + off) % odd.length]]);
+        const total = pairs.reduce((t, q) => t + D(...q), 0);
+        const toPen = n => Math.hypot(pts[n][0] - penX, pts[n][1] - penY);
+        pairs.forEach((q, li) => {                      // the open pair also decides where the walk starts
+          const cost = total - D(...q) + Math.min(toPen(q[0]), toPen(q[1]));
+          if (!best || cost < best.cost) best = { cost, pairs, li };
+        });
+      }
+      best.pairs.forEach((q, i) => {
+        if (i === best.li) { ends = q; return; }
+        adj[q[0]].push(edges.length); adj[q[1]].push(edges.length); edges.push(q);
+      });
+    }
+    const travel = e => e >= nReal;
+
     const used = new Array(edges.length).fill(false);
     const left = n => adj[n].filter(e => !used[e]);
     const other = (e, n) => edges[e][0] === n ? edges[e][1] : edges[e][0];
-    const unit = (a, b) => { const dx = pts[b][0] - pts[a][0], dy = pts[b][1] - pts[a][1], l = Math.hypot(dx, dy); return [dx / l, dy / l]; };
-    const trails = [];
-    let remaining = edges.length, px = penX, py = penY;
+    const unit = (a, b) => { const dx = pts[b][0] - pts[a][0], dy = pts[b][1] - pts[a][1], l = Math.hypot(dx, dy) || 1; return [dx / l, dy / l]; };
 
-    while (remaining > 0) {
-      let best = -1, bestKey = null;                    // odd crossings first, then nearest to the pen
-      for (let n = 0; n < pts.length; n++) {
-        const d = left(n).length;
-        if (!d) continue;
-        const key = [d % 2 ? 0 : 1, Math.hypot(pts[n][0] - px, pts[n][1] - py)];
-        if (!bestKey || key[0] < bestKey[0] || (key[0] === bestKey[0] && key[1] < bestKey[1] - 1e-9)) { best = n; bestKey = key; }
+    // Hierholzer: returns the walk as [node, edge used to get there]
+    const euler = start => {
+      const stack = [[start, -1, null]], walk = [];
+      while (stack.length) {
+        const [v, , dir] = stack[stack.length - 1];
+        const opts = left(v);
+        if (!opts.length) { walk.push(stack.pop()); continue; }
+        const rank = e => {
+          if (travel(e)) return 2;
+          if (!dir) return 1;
+          const d = unit(v, other(e, v));
+          return d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6 ? 0 : 1;
+        };
+        const e = opts.reduce((m, o) => (rank(o) < rank(m) ? o : m));
+        used[e] = true;
+        const w = other(e, v);
+        stack.push([w, e, travel(e) ? null : unit(v, w)]);
       }
-      let cur = best, dir = null;
-      const trail = [pts[cur]];
-      for (;;) {
-        const opts = left(cur);
-        if (!opts.length) break;
-        const straight = o => { if (!dir) return false; const d = unit(cur, other(o, cur)); return d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6; };
-        const e = opts.find(straight) ?? opts[0];
-        const nxt = other(e, cur);
-        const d = unit(cur, nxt);
-        used[e] = true; remaining--;
-        if (dir && d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6) trail[trail.length - 1] = pts[nxt];   // straight on: extend the last move
-        else trail.push(pts[nxt]);
-        dir = d; cur = nxt;
+      return walk.reverse();
+    };
+
+    const trails = [];
+    let px = penX, py = penY;
+    const near = n => Math.hypot(pts[n][0] - px, pts[n][1] - py);
+    while (used.some((u, e) => !u && !travel(e))) {
+      let start;
+      if (ends && !trails.length) start = near(ends[0]) <= near(ends[1]) ? ends[0] : ends[1];
+      else {                                            // a part not reached yet: odd crossings first, then nearest
+        let bk = null;
+        pts.forEach((q, n) => {
+          const d = left(n).length;
+          if (!d) return;
+          const key = [d % 2 ? 0 : 1, near(n)];
+          if (!bk || key[0] < bk[0] || (key[0] === bk[0] && key[1] < bk[1])) { bk = key; start = n; }
+        });
       }
-      trails.push(trail);
-      [px, py] = trail[trail.length - 1];
+      let trail = null, dir = null, prev = -1;
+      for (const [n, e] of euler(start)) {
+        if (e < 0 || travel(e)) { trail = [pts[n]]; trails.push(trail); dir = null; prev = n; continue; }
+        const d = unit(prev, n);
+        if (dir && d[0] * dir[0] + d[1] * dir[1] > 1 - 1e-6) trail[trail.length - 1] = pts[n];   // straight on: extend the last move
+        else trail.push(pts[n]);
+        dir = d; prev = n;
+      }
+      const lastTrail = trails[trails.length - 1];
+      [px, py] = lastTrail[lastTrail.length - 1];
     }
-    return trails;
+    return trails.filter(t => t.length > 1);
+  }
+
+  // Order and direction of the trails so the travel between them is as short as possible:
+  // the given order or nearest neighbour (whichever is shorter), then 2-opt (reversing a run of trails also flips each one). Trails that
+  // end exactly where the next one starts are joined, so there is no lift for a zero-length jump.
+  function orderTrails(trails, penX, penY) {
+    const n = trails.length;
+    if (n < 2) return trails;
+    const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    let seq = [], pen = [penX, penY];
+    const left = trails.map((t, i) => i);
+    while (left.length) {
+      let bi = 0, bf = false, bd = Infinity;
+      left.forEach((ti, k) => {
+        const t = trails[ti], ds = d(pen, t[0]), de = d(pen, t[t.length - 1]);
+        if (ds < bd) { bd = ds; bi = k; bf = false; }
+        if (de < bd) { bd = de; bi = k; bf = true; }
+      });
+      const t = trails[left.splice(bi, 1)[0]];
+      seq.push(bf ? t.slice().reverse() : t);
+      pen = seq[seq.length - 1][seq[seq.length - 1].length - 1];
+    }
+    const S = t => t[0], E = t => t[t.length - 1];
+    const cost = q => q.reduce((t, x, k) => t + d(k ? E(q[k - 1]) : [penX, penY], S(x)), 0);
+    if (cost(trails) <= cost(seq)) seq = trails.map(t => t.slice());   // keep the given order when it is already better
+    const before = i => (i === 0 ? [penX, penY] : E(seq[i - 1]));
+    const until = performance.now() + 120;              // time budget: big grids get what fits, the UI stays responsive
+    for (let pass = 0, improved = true; improved && pass < 50 && performance.now() < until; pass++) {
+      improved = false;
+      for (let i = 0; i < n - 1 && performance.now() < until; i++) for (let j = i + 1; j < n; j++) {
+        const a = before(i), next = j + 1 < n ? S(seq[j + 1]) : null;
+        const old = d(a, S(seq[i])) + (next ? d(E(seq[j]), next) : 0);
+        const neu = d(a, E(seq[j])) + (next ? d(S(seq[i]), next) : 0);
+        if (neu < old - 1e-9) {
+          seq = [...seq.slice(0, i), ...seq.slice(i, j + 1).reverse().map(t => t.slice().reverse()), ...seq.slice(j + 1)];
+          improved = true;
+        }
+      }
+    }
+    const out = [seq[0].slice()];
+    for (let k = 1; k < n; k++) {
+      const last = out[out.length - 1];
+      if (d(E(last), S(seq[k])) < 1e-6) last.push(...seq[k].slice(1));
+      else out.push(seq[k].slice());
+    }
+    return out;
   }
 
   // Grid lines through the same points: points_y horizontal lines spanning the width,
@@ -1111,12 +1209,13 @@
 
     const optimize = optOn();
     const segs = gridSegments(startX, startY, width, height, nH, nV, val('angle'));
-    let nStrokes = 0, penX = startX, penY = startY;
+    let nStrokes = 0, penX = startX, penY = startY, travelMm = 0;
     const outline = outOn();
     const outCount = outline ? outlineTrails(segs, startX, startY, width, height, startX, startY).length : 0;
     const emitTrail = (trail, label, liftZ, printZ) => {
       lines.push(`;  ${label}`);
       lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+      travelMm += Math.hypot(trail[0][0] - penX, trail[0][1] - penY);
       lines.push(`G0 F${spTravel} X${fmtXY(trail[0][0])} Y${fmtXY(trail[0][1])}`);
       lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
       for (let p = 1; p < trail.length; p++) {
@@ -1136,7 +1235,7 @@
       lines.push(``);
 
       if (optimize) {
-        const trails = gridTrails(segs, penX, penY);
+        const trails = orderTrails(gridTrails(segs, penX, penY, startX, startY, width, height), penX, penY);
         trails.forEach((trail, k) => emitTrail(trail, `Path ${k + 1} / ${trails.length}`, liftZ, printZ));
         lines.push(``);
       } else {
@@ -1145,6 +1244,7 @@
         lines.push(`;  ${title}`);
         list.forEach(g => {
           lines.push(`G0 F${spTravel} Z${fmtZ(liftZ)}`);
+          travelMm += Math.hypot(g.x1 - penX, g.y1 - penY); [penX, penY] = [g.x2, g.y2];
           lines.push(`G0 F${spTravel} X${fmtXY(g.x1)} Y${fmtXY(g.y1)}`);
           lines.push(`G0 F3000 Z${fmtZ(printZ)}`);
           E += calcExtrusion(Math.hypot(g.x2 - g.x1, g.y2 - g.y1), layerH, lw, flow);
@@ -1172,7 +1272,7 @@
     return {
       lines,
       info: [`${nStrokes} strokes${optimize ? ` (was ${(segs.h.length + segs.v.length + outCount) * nLayers})` : ''} · ${nH} horizontal × ${nV} vertical · ${nLayers} layer${nLayers > 1 ? 's' : ''} · ${lines.length} lines`,
-             `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · E total ${E.toFixed(3)}`],
+             `spacing ${spV.toFixed(2)} × ${spH.toFixed(2)} mm · travel ${travelMm.toFixed(0)} mm · E total ${E.toFixed(3)}`],
       geom: { kind: 'lines', width, height, ox: startX, oy: startY, px: nV, py: nH, lw, angle: val('angle'), outline: outOn() },
       filename: `grid_${nH}h_${nV}v.gcode`,
     };

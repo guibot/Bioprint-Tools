@@ -27,7 +27,7 @@ Browser-based G-code generators for extrusion bioprinters. Pick a tool, tweak th
 | Tool | What it does |
 | --- | --- |
 | **Dot / Line Grid** | Prints a grid either as discrete **dots** (Z-hop and dwell per dot) or as **lines** (horizontal + vertical strokes, multiple layers). Both modes share the same grid box, position and work area. |
-| **Image → G-code** | Turns an image into a toolpath placed on a work-area preview. Modes: **dots**, **crosshatch**, **spiral**, **raster** (serpentine fill at any angle), **contour** (concentric outlines), **scaffold** (multilayer woodpile with alternating angles) and **single line** (traces the centerline of a drawn line as one continuous stroke). |
+| **Image → G-code** | Turns an image into a toolpath placed on a work-area preview. Modes: **dots**, **crosshatch**, **spiral**, **raster** (serpentine fill at any angle), **contour** (outline only), **scaffold** (multilayer woodpile with alternating angles) and **single line** (traces the centerline of a drawn line as one continuous stroke). |
 
 All tools share the same behaviour: numeric fields work like sliders (drag across a field to set its value, or click to type), the G-code and preview regenerate automatically on every change, and invalid values show an error instead of producing broken G-code.
 

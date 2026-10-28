@@ -255,17 +255,17 @@
     </div>
 
     <div class="param-group">
-      <div class="param-group-label with-actions"><span>Position</span><span class="ghost-actions"><button class="ghost-btn" id="btn-ghost" title="Keep the current print as a faint ghost on the preview">GHOST</button><button class="ghost-btn" id="btn-ghost-clear" title="Remove all ghosts">CLEAR</button></span></div>
-      <div class="field" data-min="0" data-max="@bed_x"><label for="origin_x">Origin X</label><input id="origin_x" type="number" value="0" step="1"><span class="unit">mm</span></div>
-      <div class="field" data-min="0" data-max="@bed_y"><label for="origin_y">Origin Y</label><input id="origin_y" type="number" value="0" step="1"><span class="unit">mm</span></div>
-    </div>
-
-    <div class="param-group">
       <div class="param-group-label">Image size</div>
       <div class="field" data-min="1" data-max="@bed_x"><label for="width">Width</label><input id="width" type="number" value="100" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="1" data-max="@bed_y"><label for="height">Height</label><input id="height" type="number" value="100" step="1"><span class="unit">mm</span></div>
       <div class="field" data-min="2" data-max="100"><label for="points_x">Points X</label><input id="points_x" type="number" value="10" step="1"><span class="unit"></span></div>
       <div class="field" data-min="2" data-max="100"><label for="points_y">Points Y</label><input id="points_y" type="number" value="10" step="1"><span class="unit"></span></div>
+    </div>
+
+    <div class="param-group">
+      <div class="param-group-label with-actions"><span>Position</span><span class="ghost-actions"><button class="ghost-btn" id="btn-ghost" title="Keep the current print as a faint ghost on the preview">GHOST</button><button class="ghost-btn" id="btn-ghost-clear" title="Remove all ghosts">CLEAR</button></span></div>
+      <div class="field" data-min="0" data-max="@bed_x"><label for="origin_x">Origin X</label><input id="origin_x" type="number" value="0" step="1"><span class="unit">mm</span></div>
+      <div class="field" data-min="0" data-max="@bed_y"><label for="origin_y">Origin Y</label><input id="origin_y" type="number" value="0" step="1"><span class="unit">mm</span></div>
     </div>
 
     <div class="param-group" data-modes="dots crosshatch spiral">
@@ -287,7 +287,6 @@
       <div class="field" data-min="10" data-max="1500"><label for="print_speed">Print speed</label><input id="print_speed" type="number" value="300" step="10"><span class="unit">mm/min</span></div>
       <div class="field" data-modes="raster scaffold" data-min="0.2" data-max="5"><label for="line_spacing">Line spacing</label><input id="line_spacing" type="number" value="1" step="0.1"><span class="unit">mm</span></div>
       <div class="field" data-modes="raster" data-min="0" data-max="179"><label for="raster_angle">Angle</label><input id="raster_angle" type="number" value="0" step="1"><span class="unit">°</span></div>
-      <div class="field" data-modes="contour" data-min="1" data-max="10"><label for="contour_count">Outlines</label><input id="contour_count" type="number" value="2" step="1"><span class="unit"></span></div>
     </div>
 
     <div class="param-group" data-modes="scaffold">
@@ -621,12 +620,6 @@
     return out;
   }
 
-  // One pixel of erosion (4-neighbourhood); pixels on the image border are eroded too.
-  function erodeMask(m, nx, ny) {
-    return m.map((row, j) => row.map((v, i) =>
-      v && j > 0 && j < ny - 1 && i > 0 && i < nx - 1 && m[j-1][i] && m[j+1][i] && m[j][i-1] && m[j][i+1]));
-  }
-
   // Marching squares on a binary grid (padded with an empty border so every outline closes).
   // Returns closed loops as arrays of [x, y] in mm; the first point is repeated at the end.
   function contourLoops(m, nx, ny, ox, oy, sx, sy) {
@@ -897,18 +890,9 @@
       return out;
     }
 
-    // contour: `count` concentric outlines, each one pixel further inside
-    let m = pixels.map(row => row.map(v => v > 0));
-    const out = [];
-    let cur = [ox, oy];
-    for (let r = 0; r < o.count; r++) {
-      const loops = orderLoops(contourLoops(m, nx, ny, ox, oy, sx, sy), cur);
-      if (!loops.length) break;
-      loops.forEach(pts => out.push({ pts, z: zp, hop: zh, layer: r }));
-      cur = loops[loops.length - 1][0];
-      m = erodeMask(m, nx, ny);
-    }
-    return out;
+    // contour: just the outline of the shape (and of any holes in it)
+    const m = pixels.map(row => row.map(v => v > 0));
+    return orderLoops(contourLoops(m, nx, ny, ox, oy, sx, sy), [ox, oy]).map(pts => ({ pts, z: zp, hop: zh, layer: 0 }));
   }
 
   function strokesLength(strokes) {
@@ -1354,7 +1338,7 @@
     const steps   = intVal('spiral_steps');
     const isPath  = mode === 'raster' || mode === 'contour' || mode === 'scaffold' || mode === 'singleline';
     const lineOpts = isPath ? {
-      start: document.getElementById('line_start').value, angle: val('raster_angle'), spacing: val('line_spacing'), count: intVal('contour_count'),
+      start: document.getElementById('line_start').value, angle: val('raster_angle'), spacing: val('line_spacing'),
       layers: intVal('n_layers'), layerH: val('layer_h'), angleStep: val('angle_step'),
     } : null;
     const ePerMm = isPath ? val('e_per_mm') : 0;
@@ -1596,7 +1580,6 @@
     print_speed:  ['must be > 0', v => v > 0],
     line_spacing: ['must be ≥ 0.05', v => v >= 0.05],
     raster_angle: ['must be a number', () => true],
-    contour_count:['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
     n_layers:     ['must be an integer ≥ 1', v => Number.isInteger(v) && v >= 1],
     layer_h:      ['must be > 0', v => v > 0],
     angle_step:   ['must be a number', () => true],
@@ -1629,7 +1612,16 @@
   document.getElementById('canvas').addEventListener('mousemove', onCanvasMove);
   document.getElementById('canvas').addEventListener('mouseleave', hideGhostCard);
   document.getElementById('btn-copy').addEventListener('click', copyGcode);
-  document.getElementById('mode').addEventListener('change', onModeChange);   // runs before the auto-generate handler
+  // Picking raster or scaffold sets the values that suit that mode; they can still be changed afterwards.
+  const MODE_DEFAULTS = {
+    raster:   { points_x: 15, points_y: 15, line_spacing: 5, raster_angle: 0 },
+    scaffold: { points_x: 15, points_y: 15, line_spacing: 5 },
+  };
+  document.getElementById('mode').addEventListener('change', e => {   // runs before the auto-generate handler
+    Object.entries(MODE_DEFAULTS[e.target.value] || {}).forEach(([id, v]) => { document.getElementById(id).value = v; });
+    onModeChange();
+    updateFills();
+  });
   document.querySelectorAll('#view-seg button').forEach(b => b.addEventListener('click', () => {
     view = b.dataset.view;
     document.querySelectorAll('#view-seg button').forEach(x => x.classList.toggle('active', x === b));
