@@ -30,6 +30,7 @@
     position: sticky; top: 2.5rem; align-self: start;
     max-height: calc(100vh - 5rem); overflow-y: auto; padding-right: 12px;
   }
+  .tool-params > * { flex-shrink: 0; }                      /* never squash a block to fit the column height */
   .tool-params::-webkit-scrollbar { width: 3px; }
   .tool-params::-webkit-scrollbar-thumb { background: transparent; border-radius: 2px; }      /* only visible while the mouse is over the column */
   .tool-params:hover::-webkit-scrollbar-thumb { background: var(--border2); }
